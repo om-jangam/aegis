@@ -57,6 +57,10 @@ class Settings:
     # telemetry Aegis cannot collect are skipped and reported, never silently.
     sigma_rule_paths: list[str] = field(default_factory=list)
 
+    # Threat intelligence (IP blocklists in <data dir>/intel, see `aegis intel`)
+    threat_intel_enabled: bool = True
+    intel_paths: list[str] = field(default_factory=list)
+
     # Alerts
     desktop_notifications: bool = True
     alert_cooldown_seconds: int = 30        # suppress duplicate alerts

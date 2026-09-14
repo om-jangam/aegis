@@ -12,7 +12,45 @@ All notable changes to Aegis are documented here. The format is based on
 - Signed / integrity-checked ML model format to remove the `joblib` pickle
   residual risk.
 - Locale-independent firewall management via the Windows COM API (`INetFwPolicy2`).
-- UI test coverage; screenshots and a demo GIF in the README.
+- DNS telemetry, so threat intel can match malicious domains as well as IPs.
+
+## [1.1.0] - 2026-09-14
+
+Aegis becomes useful to people who are not security analysts: it now tells you
+how exposed your machine is and how to fix it, recognises known-malicious
+infrastructure, and runs in any browser.
+
+### Added
+- **`aegis check`**: read-only security posture audit with a 0-100 score, a
+  letter grade and a plain-language fix for every problem. Checks the host
+  firewall, network-exposed risky services (Redis, MongoDB, Telnet, RDP...),
+  Microsoft Defender, UAC, Remote Desktop and NLA, SMBv1, auto-logon with a
+  stored password, disk encryption (BitLocker / FileVault / LUKS), SSH server
+  hardening and permissions on account files. `--json` and `--fail-on LEVEL`
+  make it usable in scripts and CI.
+- **Threat intelligence**: `NET-THREAT-INTEL` flags connections to listed IPs
+  and CIDR ranges (critical severity, auto-containment capable) even on normal
+  ports. `aegis intel update` downloads abuse.ch Feodo Tracker, Emerging Threats
+  and Spamhaus DROP over HTTPS; `aegis intel lookup` / `status` query them; any
+  plain-text IP list dropped into the intel folder is picked up live.
+- **`aegis serve`**: local web dashboard and JSON API (security score, alerts
+  with acknowledge, findings, top techniques and talkers, audit trail).
+  Loopback by default, bearer token in the URL fragment, Host-header allow-list
+  against DNS rebinding, strict CSP; `--monitor` runs live detection alongside.
+- **`aegis report`**: self-contained HTML report with a prioritised
+  "what to do first" list, suitable for emailing or printing.
+- **Guidance**: every ATT&CK technique Aegis detects is paired with a short,
+  non-expert explanation of what to do next (dashboard and report).
+- Cross-platform response (nftables on Linux, pf on macOS), collectors and
+  alerting; headless CLI (`monitor`, `status`, `rules`, `block`, `sigma`);
+  Sigma rule engine with bundled rules; file integrity monitoring.
+
+### Security
+- Intel feeds are validated line by line; private, reserved and over-broad
+  ranges (wider than /8 or IPv6 /32) are rejected so a bad feed line cannot
+  flag every connection. A failed or empty download keeps the previous copy.
+- `aegis intel update` is the only command that makes network requests, and it
+  runs only when invoked.
 
 ## [1.0.0] - 2026-07-26
 

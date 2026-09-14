@@ -61,6 +61,7 @@ exclude = ["reference_scaffold*", "tests*"]
 # The bundled Sigma rules are data, not code, so they must be declared to reach
 # the wheel — otherwise an installed Aegis would load zero rules.
 "aegis.detection.sigma" = ["rules/*.yml", "rules/*.yaml", "rules/README.md"]
+"aegis.api" = ["static/*.html", "static/*.js", "static/*.css"]
 
 [tool.setuptools.dynamic]
 version = { attr = "aegis.__version__" }

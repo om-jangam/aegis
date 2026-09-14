@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aegis dashboard</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="shield" aria-hidden="true"></span>Aegis</div>
+    <div id="host" class="muted"></div>
+    <div id="live" class="pill">connecting</div>
+  </header>
+
+  <main>
+    <div id="auth-error" class="banner" hidden>
+      This dashboard needs the private link printed by <code>aegis serve</code>.
+      Open that link (it ends in <code>#token=...</code>) in this browser.
+    </div>
+
+    <section class="kpis" aria-label="Key figures">
+      <div class="kpi"><span class="label">Security score</span><span id="kpi-score" class="value">-</span><span id="kpi-grade" class="sub"></span></div>
+      <div class="kpi"><span class="label">Open alerts</span><span id="kpi-open" class="value">-</span><span class="sub">need attention</span></div>
+      <div class="kpi"><span class="label">Findings</span><span id="kpi-findings" class="value">-</span><span class="sub">detections recorded</span></div>
+      <div class="kpi"><span class="label">Events</span><span id="kpi-events" class="value">-</span><span class="sub">telemetry observed</span></div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <div class="card-head"><h2>Security check</h2><button id="rerun" type="button">Re-run</button></div>
+        <p class="muted small">Configuration problems that make this machine easier to attack, with how to fix each one.</p>
+        <ul id="posture" class="checks"></ul>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Alerts</h2><button id="ack-all" type="button">Acknowledge all</button></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Severity</th><th>Alert</th><th>Source</th><th>When</th><th></th></tr></thead>
+          <tbody id="alerts"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="card"><h2>Top ATT&amp;CK techniques</h2><ul id="techniques" class="bars"></ul></div>
+      <div class="card"><h2>Most contacted addresses</h2><ul id="remotes" class="bars"></ul></div>
+    </section>
+
+    <section class="card">
+      <h2>Recent findings</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Severity</th><th>Detection</th><th>Subject</th><th>What to do</th><th>When</th></tr></thead>
+        <tbody id="findings"></tbody>
+      </table></div>
+    </section>
+
+    <section class="card">
+      <h2>Audit trail</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>When</th><th>Category</th><th>Action</th><th>Detail</th><th>By</th></tr></thead>
+        <tbody id="audit"></tbody>
+      </table></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

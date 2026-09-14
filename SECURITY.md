@@ -20,8 +20,14 @@ documented in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md). In summary:
 - The firewall engine executes `netsh` with **argument lists and `shell=False`**;
   all rule input is validated first (see `aegis/core/validators.py`). Command
   injection is regression-tested.
-- Aegis performs **no network egress** — telemetry stays on the host.
-- Read-only monitoring runs unprivileged; only rule mutation needs Administrator.
+- Telemetry, findings and reports **never leave the host**. The only outbound
+  request is `aegis intel update`, which runs only when a user invokes it,
+  fetches fixed HTTPS feed URLs with a size cap, and validates every line.
+- Read-only monitoring, `aegis check` and the dashboard run unprivileged; only
+  firewall mutation needs Administrator / root.
+- The web dashboard (`aegis serve`) binds to loopback by default, requires a
+  per-run random bearer token, rejects unexpected `Host` headers (DNS
+  rebinding), and sends a strict Content-Security-Policy.
 
 ## Known residual risks
 
@@ -31,7 +37,15 @@ documented in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md). In summary:
   guarded load, and the ML assist can be disabled in Settings. A signed/integrity-
   checked model format is planned (see CHANGELOG "Unreleased").
 - **`netsh` text parsing is English-locale oriented;** a locale-independent COM
-  (`INetFwPolicy2`) path is planned.
+  (`INetFwPolicy2`) path is planned. The posture firewall check reports "skipped"
+  rather than a false verdict when it cannot parse localized output.
+- **Dashboard over plain HTTP:** the token protects against other users and web
+  pages, not against someone who can read the loopback traffic or the terminal
+  where the link is printed. Binding `--host` to a network address exposes the
+  token to the network; use SSH port forwarding instead.
+- **Threat-intel trust:** feed publishers decide what is flagged. With
+  `--auto-respond`, a wrong entry could block a legitimate host; add it to
+  `trusted_remote_ips` to override.
 
 ## Supported versions
 

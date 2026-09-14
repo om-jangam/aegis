@@ -246,6 +246,207 @@ def cmd_sigma(args) -> int:
     return 0
 
 
+_CHECK_COLOUR = {"pass": "\033[32m", "warn": "\033[33m", "fail": "\033[1;31m", "skip": "\033[90m"}
+_CHECK_ORDER = {"fail": 0, "warn": 1, "pass": 2, "skip": 3}
+
+
+def cmd_check(args) -> int:
+    """Audit this host's security configuration and explain how to fix it."""
+    from aegis.posture import CheckStatus, run_posture_checks
+
+    report = run_posture_checks()
+    failing = report.failing(args.fail_on) if args.fail_on else []
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2))
+        return 1 if failing else 0
+
+    colour = _use_colour(sys.stdout)
+    print(f"Aegis security check ({report.platform})\n")
+    ordered = sorted(report.results,
+                     key=lambda r: (_CHECK_ORDER[r.status.value], -r.severity.rank))
+    for r in ordered:
+        label = r.status.value.upper()
+        if colour:
+            label = f"{_CHECK_COLOUR[r.status.value]}{label}{_RESET}"
+        print(f"  [{label}] {r.title}")
+        print(f"         {r.summary}")
+        for detail in r.details:
+            print(f"           - {detail}")
+        if r.remediation:
+            print(f"         Fix: {r.remediation}")
+    print()
+    if report.evaluated == 0:
+        print("No checks could be evaluated on this host.")
+    else:
+        print(f"Score {report.score}/100 (grade {report.grade}): "
+              f"{report.count(CheckStatus.FAIL)} failed, "
+              f"{report.count(CheckStatus.WARN)} warnings, "
+              f"{report.count(CheckStatus.PASS)} passed, "
+              f"{report.count(CheckStatus.SKIP)} skipped")
+    return 1 if failing else 0
+
+
+def cmd_intel(args) -> int:
+    """Manage and query threat-intelligence blocklists."""
+    import ipaddress
+
+    from aegis.intel import get_intel, intel_dir, reset_cache
+    from aegis.intel.feeds import FEEDS, update_feeds
+
+    action = getattr(args, "intel_command", None) or "status"
+
+    if action == "update":
+        known = {f.name for f in FEEDS}
+        unknown = sorted(set(args.feed or []) - known)
+        if unknown:
+            print(f"Unknown feed(s): {', '.join(unknown)}. Available: {', '.join(sorted(known))}",
+                  file=sys.stderr)
+            return 2
+        feeds = [f for f in FEEDS if not args.feed or f.name in args.feed]
+        print(f"Downloading {len(feeds)} feed(s) into {intel_dir()}")
+        results = update_feeds(intel_dir(), feeds)
+        for r in results:
+            print(f"  {'ok  ' if r.ok else 'FAIL'} {r.feed.name:<16} {r.message}")
+        reset_cache()
+        return 0 if any(r.ok for r in results) else 1
+
+    intel = get_intel()
+
+    if action == "lookup":
+        try:
+            ipaddress.ip_address(args.ip)
+        except ValueError:
+            print(f"Not an IP address: {args.ip}", file=sys.stderr)
+            return 2
+        match = intel.match(args.ip)
+        if args.json:
+            print(json.dumps({"ip": args.ip, "listed": match is not None,
+                              "indicator": match.indicator if match else None,
+                              "source": match.source if match else None}))
+        elif match:
+            print(f"{args.ip} is LISTED: matches {match.indicator} in '{match.source}'")
+        else:
+            print(f"{args.ip} is not listed ({len(intel)} indicators checked).")
+        return 0 if match else 1
+
+    info = {"directory": str(intel_dir()), "indicators": len(intel),
+            "sources": intel.sources, "rejected_lines": intel.rejected,
+            "available_feeds": [f.name for f in FEEDS]}
+    if args.json:
+        print(json.dumps(info, indent=2))
+        return 0
+    print(f"Indicator directory  {info['directory']}")
+    print(f"Indicators loaded    {info['indicators']}")
+    for source, count in sorted(intel.sources.items()):
+        print(f"  {source:<24}{count}")
+    if not len(intel):
+        print("\nNo indicators loaded. Run `aegis intel update` to download free public "
+              "blocklists, or put your own lists (one IP or CIDR per line, .txt) in the "
+              "directory above.")
+    return 0
+
+
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def cmd_serve(args) -> int:
+    """Serve the local web dashboard."""
+    import secrets
+    import webbrowser
+
+    from aegis.api.server import create_server
+
+    if args.host in ("0.0.0.0", "::", ""):
+        print("Refusing to listen on every interface. Pass a specific address with --host, "
+              "or keep the default and use SSH port forwarding.", file=sys.stderr)
+        return 2
+
+    service = None
+    if args.monitor:
+        from aegis.service import SecurityService
+
+        service = SecurityService(auto_respond=args.auto_respond)
+        store = service.store
+    else:
+        from aegis.storage.database import SQLiteEventStore
+
+        store = SQLiteEventStore()
+
+    def release() -> None:
+        if service is not None:
+            service.close()
+        else:
+            store.close()
+
+    token = secrets.token_urlsafe(32)
+    try:
+        httpd = create_server(args.host, args.port, store=store, token=token, service=service)
+    except OSError as exc:
+        print(f"Could not listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
+        release()
+        return 1
+
+    port = httpd.server_address[1]
+    shown = f"[{args.host}]" if ":" in args.host else args.host
+    url = f"http://{shown}:{port}/#token={token}"
+    if args.host not in _LOOPBACK_HOSTS:
+        print("WARNING: the dashboard is reachable from other machines over unencrypted HTTP. "
+              f"Prefer the default and SSH forwarding: ssh -L {port}:127.0.0.1:{port} <host>",
+              file=sys.stderr)
+    print(f"Aegis dashboard: {url}")
+    print("The link contains a private access token; do not share it.")
+    print(f"Mode: {'live monitoring' if service else 'viewing stored data'}. "
+          f"Press Ctrl+C to stop.", flush=True)
+
+    if service is not None:
+        service.start()
+    threading.Thread(target=httpd.serve_forever, name="dashboard", daemon=True).start()
+    if not args.no_browser:
+        webbrowser.open(url)
+
+    stop = threading.Event()
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    try:
+        while not stop.wait(0.5):
+            pass
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        release()
+    return 0
+
+
+def cmd_report(args) -> int:
+    """Write a self-contained HTML security report."""
+    from pathlib import Path
+
+    from aegis.reporting import build_report
+    from aegis.storage.database import SQLiteEventStore
+
+    posture = None
+    if not args.no_check:
+        from aegis.posture import run_posture_checks
+
+        posture = run_posture_checks()
+
+    store = SQLiteEventStore()
+    try:
+        document = build_report(store, posture)
+    finally:
+        store.close()
+
+    path = Path(args.output or f"aegis-report-{datetime.now():%Y%m%d-%H%M}.html")
+    try:
+        path.write_text(document, encoding="utf-8")
+    except OSError as exc:
+        print(f"Could not write {path}: {exc}", file=sys.stderr)
+        return 1
+    print(f"Report written to {path.resolve()}")
+    return 0
+
+
 def cmd_console(args) -> int:
     """Launch the desktop UI."""
     try:
@@ -314,6 +515,53 @@ def build_parser() -> argparse.ArgumentParser:
                               "to measure what a richer collector would unlock")
     p_sigma.add_argument("--json", action="store_true", help="machine-readable output")
     p_sigma.set_defaults(func=cmd_sigma)
+
+    p_check = sub.add_parser(
+        "check", help="audit this host's security settings and explain fixes",
+        description="Run read-only checks on firewall, exposed services, antivirus, "
+                    "encryption, remote access and more; print a score and how to fix "
+                    "each problem.")
+    p_check.add_argument("--json", action="store_true", help="machine-readable output")
+    p_check.add_argument("--fail-on", type=_severity, default=None, metavar="LEVEL",
+                         help="exit 1 if any check at or above this severity fails "
+                              "(for scripts and CI)")
+    p_check.set_defaults(func=cmd_check)
+
+    p_intel = sub.add_parser("intel", help="manage threat-intelligence blocklists")
+    p_intel.set_defaults(func=cmd_intel, intel_command=None, json=False)
+    intel_sub = p_intel.add_subparsers(dest="intel_command")
+    p_intel_status = intel_sub.add_parser("status", help="show loaded indicator lists")
+    p_intel_status.add_argument("--json", action="store_true", help="machine-readable output")
+    p_intel_update = intel_sub.add_parser(
+        "update", help="download free public blocklists (the only command that goes online)")
+    p_intel_update.add_argument("--feed", action="append", default=None, metavar="NAME",
+                                help="only update this feed (repeatable)")
+    p_intel_lookup = intel_sub.add_parser(
+        "lookup", help="check whether an IP is listed (exit 0 if listed, 1 if not)")
+    p_intel_lookup.add_argument("ip")
+    p_intel_lookup.add_argument("--json", action="store_true", help="machine-readable output")
+
+    p_serve = sub.add_parser(
+        "serve", help="open the web dashboard in your browser",
+        description="Serve a local, token-protected web dashboard. Works on any OS and on "
+                    "headless servers (reach it with SSH port forwarding).")
+    p_serve.add_argument("--host", default="127.0.0.1",
+                         help="address to listen on (default 127.0.0.1, this machine only)")
+    p_serve.add_argument("--port", type=int, default=8765, help="port (default 8765, 0 = any)")
+    p_serve.add_argument("--monitor", action="store_true",
+                         help="also run live detection, so the dashboard updates in real time")
+    p_serve.add_argument("--auto-respond", action="store_true",
+                         help="with --monitor, block hosts behind high-severity findings")
+    p_serve.add_argument("--no-browser", action="store_true",
+                         help="print the link without opening a browser")
+    p_serve.set_defaults(func=cmd_serve)
+
+    p_report = sub.add_parser("report", help="write a shareable HTML security report")
+    p_report.add_argument("-o", "--output", metavar="FILE",
+                          help="where to write (default aegis-report-<date>.html)")
+    p_report.add_argument("--no-check", action="store_true",
+                          help="skip the security check and report stored detections only")
+    p_report.set_defaults(func=cmd_report)
 
     p_rules = sub.add_parser("rules", help="list managed firewall rules")
     p_rules.add_argument("--all", action="store_true",
