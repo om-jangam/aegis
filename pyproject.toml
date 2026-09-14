@@ -25,8 +25,9 @@ classifiers = [
     "Topic :: Security",
     "Topic :: System :: Monitoring",
 ]
+# The base install is headless so it can go on a server without dragging in a
+# GUI toolkit. The desktop console is the `ui` extra.
 dependencies = [
-    "flet==0.86.*",
     "psutil>=7.0,<8",
     "win11toast>=0.35; sys_platform == 'win32'",
     "scikit-learn>=1.5,<2",
@@ -40,14 +41,16 @@ Repository = "https://github.com/your-username/aegis"
 Issues = "https://github.com/your-username/aegis/issues"
 
 [project.optional-dependencies]
+ui = ["flet==0.86.*"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.6",
+    "flet==0.86.*",
 ]
 
 [project.scripts]
-aegis = "aegis.__main__:main"
+aegis = "aegis.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["aegis*"]

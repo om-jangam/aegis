@@ -59,13 +59,32 @@ def feature_vector(event: NetworkEvent) -> list[float]:
 class MLAssist:
     MIN_SAMPLES = 50
 
-    def __init__(self, model_path=MODEL_PATH):
+    def __init__(self, model_path=MODEL_PATH, load_async: bool = True):
         self._model_path = model_path
         self._buffer: deque[list[float]] = deque(maxlen=3000)
         self._model = None
         self._trained = False
         self._lock = threading.RLock()
-        self._load()
+        self._ready = threading.Event()
+        # Deserialising the model drags in scikit-learn, which costs seconds on a
+        # cold start. Blocking the constructor on that delayed the whole service
+        # — and the UI behind it — before a single event could be collected.
+        # Loading off-thread is safe precisely because rules lead and ML assists:
+        # until the model arrives, score() simply returns None and the rule
+        # engine carries detection on its own.
+        if load_async:
+            threading.Thread(target=self._load_and_signal,
+                             name="ml-model-load", daemon=True).start()
+        else:
+            self._load_and_signal()
+
+    def wait_until_ready(self, timeout: float | None = None) -> bool:
+        """Block until the saved model has finished loading (or failed to).
+
+        Only needed by tests and the evaluation harness; live detection never
+        waits, it just starts scoring once the model is present.
+        """
+        return self._ready.wait(timeout)
 
     # -- learning ----------------------------------------------------------- #
     def observe(self, event: Event) -> None:
@@ -153,16 +172,33 @@ class MLAssist:
         except Exception:  # noqa: BLE001
             log.exception("Could not persist anomaly model")
 
+    def _load_and_signal(self) -> None:
+        try:
+            self._load()
+        finally:
+            # Signalled even on failure: waiters care that loading is *finished*,
+            # not that it succeeded. A failed load simply leaves the assist idle.
+            self._ready.set()
+
     def _load(self) -> None:
         try:
             import joblib
-            if self._model_path.exists():
-                self._model = joblib.load(self._model_path)
+            if not self._model_path.exists():
+                return
+            model = joblib.load(self._model_path)
+            with self._lock:
+                # Training can finish first on a busy host; a stale model from
+                # disk must not overwrite one just fitted to live traffic.
+                if self._trained:
+                    return
+                self._model = model
                 self._trained = True
-                log.info("Loaded anomaly model from %s", self._model_path)
+            log.info("Loaded anomaly model from %s", self._model_path)
         except Exception:  # noqa: BLE001
             log.exception("Could not load anomaly model; starting fresh")
-            self._model, self._trained = None, False
+            with self._lock:
+                if not self._trained:
+                    self._model, self._trained = None, False
 
     @property
     def trained(self) -> bool:

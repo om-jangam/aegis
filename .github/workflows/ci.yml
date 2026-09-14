@@ -5,13 +5,27 @@ on:
     branches: [ main, master ]
   pull_request:
 
+concurrency:
+  # A new push supersedes an in-flight run on the same ref.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    name: Lint & test (Windows)
-    runs-on: windows-latest
+    name: ${{ matrix.os }} · Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        # Aegis claims to run on all three desktop platforms; the matrix is what
+        # makes that claim verifiable rather than aspirational. The full Python
+        # range is exercised on Linux, with the edges covered elsewhere to keep
+        # the matrix affordable.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+        exclude:
+          - { os: windows-latest, python-version: "3.12" }
+          - { os: macos-latest, python-version: "3.12" }
 
     steps:
       - uses: actions/checkout@v4
@@ -20,6 +34,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install project + dev tooling
         # Install the package with its real dependencies (psutil, scikit-learn,
@@ -33,4 +48,32 @@ jobs:
         run: ruff check aegis tests evaluation
 
       - name: Run tests
+        # Keep test state out of the real user profile on every runner.
+        env:
+          AEGIS_DATA_DIR: ${{ runner.temp }}/aegis-data
         run: pytest --cov=aegis --cov-report=term-missing
+
+  package:
+    name: Build & verify distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+
+      - name: Verify package metadata
+        # Catches malformed metadata before it reaches PyPI, where a bad
+        # release cannot be replaced — only yanked.
+        run: twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
