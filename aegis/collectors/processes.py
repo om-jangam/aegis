@@ -145,24 +145,41 @@ class ProcessCollector(Collector):
 
     def poll(self) -> Iterable[ProcessEvent]:
         events: list[ProcessEvent] = []
-        for p in psutil.process_iter(["pid", "name", "ppid", "username"]):
+        # Requesting every attribute in one process_iter pass lets psutil batch
+        # the syscalls, which is markedly cheaper than per-attribute calls —
+        # this runs against every process on the host on every poll.
+        attrs = ["pid", "name", "ppid", "username", "cmdline", "exe"]
+        names_by_pid: dict[int, str] = {}
+        pending: list[tuple[dict, str]] = []
+
+        for p in psutil.process_iter(attrs):
             try:
-                pid = p.info["pid"]
+                info = p.info
+                pid = info["pid"]
+                names_by_pid[pid] = info.get("name") or "?"
                 if pid in self._seen_pids:
                     continue
                 self._seen_pids.add(pid)
-                exe = ""
-                try:
-                    exe = p.exe()
-                except (psutil.AccessDenied, psutil.NoSuchProcess):
-                    pass
-                events.append(ProcessEvent(
-                    type=EventType.PROCESS_START, source=self.source,
-                    pid=pid, ppid=p.info.get("ppid"), name=p.info.get("name") or "?",
-                    exe=exe, username=(p.info.get("username") or "").split("\\")[-1],
-                ))
+                # cmdline is the single most valuable process field for
+                # detection — encoded PowerShell, LOLBin arguments and
+                # download-cradles are invisible without it — but it is also the
+                # most likely to be denied, so a failure must not drop the event.
+                raw_cmdline = info.get("cmdline")
+                cmdline = " ".join(raw_cmdline) if raw_cmdline else ""
+                pending.append((info, cmdline))
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
+
+        for info, cmdline in pending:
+            ppid = info.get("ppid")
+            events.append(ProcessEvent(
+                type=EventType.PROCESS_START, source=self.source,
+                pid=info["pid"], ppid=ppid, name=info.get("name") or "?",
+                exe=info.get("exe") or "", cmdline=cmdline,
+                username=(info.get("username") or "").split("\\")[-1],
+                raw={"parent_name": names_by_pid.get(ppid, "")} if ppid else None,
+            ))
+
         if len(self._seen_pids) > 8000:
             self._seen_pids.clear()
         return events

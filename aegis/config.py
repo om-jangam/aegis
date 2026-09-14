@@ -43,6 +43,12 @@ class Settings:
     threat_score_alert_threshold: int = 70  # 0-100; >= this raises an alert
     auto_learn: bool = True                 # keep feeding the ML baseline
 
+    # Sigma rules
+    sigma_enabled: bool = True              # load the bundled Sigma rule set
+    # Extra directories of Sigma rules, e.g. a SigmaHQ checkout. Rules that need
+    # telemetry Aegis cannot collect are skipped and reported, never silently.
+    sigma_rule_paths: list[str] = field(default_factory=list)
+
     # Alerts
     desktop_notifications: bool = True
     alert_cooldown_seconds: int = 30        # suppress duplicate alerts

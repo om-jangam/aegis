@@ -1,0 +1,42 @@
+title: PowerShell Download Cradle
+id: aegis-0002-powershell-download-cradle
+status: stable
+description: >
+    PowerShell fetching remote content and executing it in memory. This is the
+    standard first stage of a fileless intrusion: nothing is written to disk for
+    a file scanner to find.
+author: Aegis
+references:
+    - https://attack.mitre.org/techniques/T1059/001/
+    - https://attack.mitre.org/techniques/T1105/
+logsource:
+    category: process_creation
+detection:
+    selection_img:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+            - '/pwsh'
+    selection_fetch:
+        CommandLine|contains:
+            - 'Net.WebClient'
+            - 'DownloadString'
+            - 'DownloadFile'
+            - 'Invoke-WebRequest'
+            - 'iwr '
+            - 'Start-BitsTransfer'
+    selection_exec:
+        CommandLine|contains:
+            - 'IEX'
+            - 'Invoke-Expression'
+            - '| iex'
+            - 'iex('
+    condition: selection_img and selection_fetch and selection_exec
+falsepositives:
+    - Package bootstrappers such as Chocolatey or scoop installers
+level: high
+tags:
+    - attack.execution
+    - attack.t1059.001
+    - attack.command-and-control
+    - attack.t1105

@@ -1,0 +1,46 @@
+title: Living-off-the-Land Binary Downloading Remote Content
+id: aegis-0004-lolbin-remote-download
+status: stable
+description: >
+    A signed Microsoft utility used to fetch a remote file. Attackers prefer
+    these over their own tooling precisely because the binary is already present,
+    already trusted, and rarely blocked by application allow-listing.
+author: Aegis
+references:
+    - https://lolbas-project.github.io/
+    - https://attack.mitre.org/techniques/T1105/
+    - https://attack.mitre.org/techniques/T1218/
+logsource:
+    category: process_creation
+detection:
+    selection_certutil:
+        Image|endswith: '\certutil.exe'
+        CommandLine|windash|contains:
+            - '-urlcache'
+            - '-verifyctl'
+            - '-split'
+    selection_bitsadmin:
+        Image|endswith: '\bitsadmin.exe'
+        CommandLine|windash|contains: '/transfer'
+    selection_mshta:
+        Image|endswith: '\mshta.exe'
+        CommandLine|contains:
+            - 'http://'
+            - 'https://'
+            - 'javascript:'
+            - 'vbscript:'
+    selection_regsvr32:
+        Image|endswith: '\regsvr32.exe'
+        CommandLine|contains:
+            - 'http://'
+            - 'https://'
+            - 'scrobj.dll'
+    condition: 1 of selection_*
+falsepositives:
+    - certutil used by administrators for genuine certificate management
+level: high
+tags:
+    - attack.command-and-control
+    - attack.t1105
+    - attack.defense-evasion
+    - attack.t1218

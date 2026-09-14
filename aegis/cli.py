@@ -122,10 +122,12 @@ def cmd_status(args) -> int:
 
 def cmd_monitor(args) -> int:
     """Run the detection pipeline in the foreground until interrupted."""
+    from aegis.detection.engine import DetectionEngine
     from aegis.service import SecurityService
 
     colour = _use_colour(sys.stdout) and not args.json
-    service = SecurityService(auto_respond=args.auto_respond)
+    engine = DetectionEngine(sigma_paths=args.sigma)
+    service = SecurityService(engine=engine, auto_respond=args.auto_respond)
     seen = threading.Event()
 
     def on_finding(finding: Finding) -> None:
@@ -146,7 +148,11 @@ def cmd_monitor(args) -> int:
 
     if not args.json:
         mode = "with auto-containment" if args.auto_respond else "detection only"
-        print(f"Aegis monitoring started ({mode}). Press Ctrl+C to stop.\n")
+        detail = f"{engine.rule_count} rules"
+        if engine.sigma_report and engine.sigma_report.skipped_count:
+            detail += f", {engine.sigma_report.skipped_count} Sigma rules skipped"
+        print(f"Aegis monitoring started ({mode}, {detail}). Press Ctrl+C to stop.\n",
+              flush=True)
 
     service.start()
     try:
@@ -206,6 +212,40 @@ def cmd_block(args) -> int:
     return 0 if result.ok else 1
 
 
+def cmd_sigma(args) -> int:
+    """Report how much of a Sigma rule set Aegis can actually evaluate."""
+    from aegis.detection.ruleset import BUNDLED_SIGMA_DIR, build_ruleset
+
+    paths = args.paths or []
+    rules, report = build_ruleset(
+        include_builtin=False,
+        include_bundled_sigma=not paths,
+        sigma_paths=paths,
+        strict_fields=not args.include_unsupported,
+    )
+
+    if args.json:
+        print(json.dumps({
+            "sources": paths or [str(BUNDLED_SIGMA_DIR)],
+            "loaded": report.loaded_count,
+            "skipped": report.skipped_count,
+            "coverage": round(report.coverage, 4),
+            "skip_reasons": dict(report.reasons()),
+            "rules": [{"id": r.rule_id, "title": r.title,
+                       "severity": r.severity.value, "technique": r.technique}
+                      for r in report.rules],
+        }, indent=2))
+        return 0
+
+    print(f"Source: {', '.join(paths) if paths else BUNDLED_SIGMA_DIR}")
+    print(report.summary())
+    if args.list:
+        print()
+        for rule in sorted(report.rules, key=lambda r: (-r.severity.rank, r.title)):
+            print(f"  {rule.severity.value:<9}{rule.technique or '-':<11}{rule.title}")
+    return 0
+
+
 def cmd_console(args) -> int:
     """Launch the desktop UI."""
     try:
@@ -241,6 +281,8 @@ def build_parser() -> argparse.ArgumentParser:
         description=f"Aegis {__version__} - {__description__}",
     )
     parser.add_argument("--version", action="version", version=f"aegis {__version__}")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="log debug detail to the console")
     sub = parser.add_subparsers(dest="command")
 
     p_status = sub.add_parser("status", help="report platform, backend and privileges")
@@ -256,7 +298,22 @@ def build_parser() -> argparse.ArgumentParser:
                                 "(info, low, medium, high, critical)")
     p_monitor.add_argument("--auto-respond", action="store_true",
                            help="automatically block hosts behind high-severity findings")
+    p_monitor.add_argument("--sigma", action="append", default=None, metavar="PATH",
+                           help="extra directory of Sigma rules (repeatable)")
     p_monitor.set_defaults(func=cmd_monitor)
+
+    p_sigma = sub.add_parser(
+        "sigma", help="report Sigma rule coverage for a rule set",
+        description="Load a Sigma rule set and report what Aegis can evaluate, "
+                    "and why anything else was skipped. With no path, inspects "
+                    "the rules bundled with Aegis.")
+    p_sigma.add_argument("paths", nargs="*", help="directories or files of Sigma rules")
+    p_sigma.add_argument("--list", action="store_true", help="list every loaded rule")
+    p_sigma.add_argument("--include-unsupported", action="store_true",
+                         help="also load rules needing telemetry Aegis cannot collect, "
+                              "to measure what a richer collector would unlock")
+    p_sigma.add_argument("--json", action="store_true", help="machine-readable output")
+    p_sigma.set_defaults(func=cmd_sigma)
 
     p_rules = sub.add_parser("rules", help="list managed firewall rules")
     p_rules.add_argument("--all", action="store_true",
@@ -276,11 +333,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import logging as _logging
+
     from aegis.logging_config import setup_logging
 
-    setup_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
+    # Findings are the CLI's output; routine INFO chatter would bury them and
+    # corrupt --json consumers' expectations of a clean stream. The rotating log
+    # file still records everything at INFO.
+    setup_logging(_logging.DEBUG if getattr(args, "verbose", False) else _logging.WARNING)
     # No subcommand keeps the original behaviour: open the desktop console.
     if not getattr(args, "command", None):
         return cmd_console(args)

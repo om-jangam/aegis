@@ -1,0 +1,36 @@
+title: Remote Script Piped Directly Into a Shell
+id: aegis-0006-curl-pipe-shell
+status: stable
+description: >
+    A download utility piping remote content straight into an interpreter. The
+    fetched script is executed without ever being written to disk or reviewed,
+    which is both a common install convention and a common compromise vector.
+author: Aegis
+references:
+    - https://attack.mitre.org/techniques/T1059/004/
+    - https://attack.mitre.org/techniques/T1105/
+logsource:
+    category: process_creation
+detection:
+    selection_fetch:
+        CommandLine|contains:
+            - 'curl '
+            - 'wget '
+    selection_pipe:
+        CommandLine|contains:
+            - '| sh'
+            - '| bash'
+            - '| zsh'
+            - '|sh'
+            - '|bash'
+            - '| python'
+            - '| perl'
+    condition: selection_fetch and selection_pipe
+falsepositives:
+    - Documented installer one-liners (rustup, nvm, Homebrew and similar)
+level: high
+tags:
+    - attack.execution
+    - attack.t1059.004
+    - attack.command-and-control
+    - attack.t1105

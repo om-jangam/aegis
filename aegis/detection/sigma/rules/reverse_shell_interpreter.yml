@@ -1,0 +1,37 @@
+title: Interpreter Spawning a Reverse Shell
+id: aegis-0008-reverse-shell
+status: experimental
+description: >
+    A scripting interpreter invoked with socket code that connects outward and
+    attaches a shell. This is a reverse shell one-liner, a direct route from
+    code execution to interactive attacker control of the host.
+author: Aegis
+references:
+    - https://attack.mitre.org/techniques/T1059/
+    - https://attack.mitre.org/techniques/T1071/
+logsource:
+    category: process_creation
+detection:
+    selection_socket_python:
+        CommandLine|contains|all:
+            - 'socket'
+            - 'subprocess'
+    selection_socket_shell:
+        CommandLine|contains:
+            - 'bash -i >&'
+            - '/dev/tcp/'
+            - 'nc -e '
+            - 'ncat -e '
+            - 'sh -i >&'
+    selection_powershell_socket:
+        CommandLine|contains|all:
+            - 'Net.Sockets.TCPClient'
+            - 'GetStream'
+    condition: 1 of selection_*
+falsepositives:
+    - Developers testing socket code interactively
+level: critical
+tags:
+    - attack.execution
+    - attack.t1059
+    - attack.command-and-control

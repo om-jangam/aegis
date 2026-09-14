@@ -18,9 +18,21 @@ log = logging.getLogger(__name__)
 
 class DetectionEngine:
     def __init__(self, rules: list[DetectionRule] | None = None,
-                 context: DetectionContext | None = None):
-        from aegis.detection.rules import default_rules
-        self.rules: list[DetectionRule] = rules if rules is not None else default_rules()
+                 context: DetectionContext | None = None,
+                 sigma_paths: list[str] | None = None):
+        #: Report from the last Sigma load, so callers can show what was skipped.
+        self.sigma_report = None
+        if rules is not None:
+            self.rules: list[DetectionRule] = rules
+        else:
+            from aegis.config import settings
+            from aegis.detection.ruleset import build_ruleset
+
+            self.rules, self.sigma_report = build_ruleset(
+                include_bundled_sigma=settings.sigma_enabled,
+                sigma_paths=sigma_paths if sigma_paths is not None
+                else list(settings.sigma_rule_paths),
+            )
         self.context = context or DetectionContext()
 
     def process(self, event: Event) -> list[Finding]:

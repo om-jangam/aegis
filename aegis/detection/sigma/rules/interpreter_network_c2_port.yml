@@ -1,0 +1,45 @@
+title: Script Interpreter Connecting to a Known C2 Port
+id: aegis-0009-interpreter-c2-port
+status: stable
+description: >
+    A scripting interpreter opening a connection to a port used by default by
+    common offensive frameworks. Either half is weak evidence alone; together
+    they are a strong indicator of an established command-and-control channel.
+author: Aegis
+references:
+    - https://attack.mitre.org/techniques/T1571/
+logsource:
+    category: network_connection
+detection:
+    selection_interpreter:
+        Image|endswith:
+            - 'powershell.exe'
+            - 'pwsh.exe'
+            - 'cmd.exe'
+            - 'wscript.exe'
+            - 'cscript.exe'
+            - 'mshta.exe'
+            - 'rundll32.exe'
+            - 'regsvr32.exe'
+            - 'python.exe'
+            - 'python3'
+            - 'perl'
+            - 'ruby'
+    selection_port:
+        DestinationPort:
+            - 1337
+            - 4444
+            - 4445
+            - 5555
+            - 6666
+            - 8443
+            - 9001
+            - 31337
+            - 50050
+    condition: selection_interpreter and selection_port
+falsepositives:
+    - Developers running local services on these ports
+level: critical
+tags:
+    - attack.command-and-control
+    - attack.t1571

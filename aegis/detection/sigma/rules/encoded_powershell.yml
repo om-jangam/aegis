@@ -1,0 +1,36 @@
+title: Encoded PowerShell Command Line
+id: aegis-0001-encoded-powershell
+status: stable
+description: >
+    PowerShell invoked with a base64-encoded command. Encoding hides the real
+    payload from casual log review and from signatures, and is a hallmark of
+    download cradles and post-exploitation frameworks.
+author: Aegis
+references:
+    - https://attack.mitre.org/techniques/T1027/
+    - https://attack.mitre.org/techniques/T1059/001/
+logsource:
+    category: process_creation
+detection:
+    selection_img:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+            - '/pwsh'
+    selection_flag:
+        CommandLine|windash|contains:
+            - ' -enc '
+            - ' -encodedcommand '
+            - ' -ec '
+    filter_admin:
+        CommandLine|contains:
+            - 'Get-WinEvent'
+            - 'Az.Accounts'
+    condition: selection_img and selection_flag and not filter_admin
+falsepositives:
+    - Management agents and CI runners that legitimately pass encoded commands
+level: high
+tags:
+    - attack.execution
+    - attack.t1059.001
+    - attack.defense-evasion
