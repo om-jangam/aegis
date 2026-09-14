@@ -4,8 +4,8 @@ from __future__ import annotations
 import flet as ft
 
 from aegis.response.firewall import is_admin
-from aegis.ui import theme
 from aegis.ui import components as c
+from aegis.ui import theme
 from aegis.ui.views.base import BaseView
 
 

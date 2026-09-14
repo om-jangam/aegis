@@ -5,21 +5,25 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aegis-hids"
 dynamic = ["version"]
-description = "Aegis — Host security monitoring, detection & response for Windows endpoints"
+description = "Aegis — Cross-platform host security monitoring, detection & response"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Aegis" }]
-keywords = ["security", "host-ids", "firewall", "detection-engineering", "mitre-attack", "blue-team"]
+authors = [{ name = "Om Jangam" }]
+keywords = ["security", "host-ids", "hids", "firewall", "detection-engineering", "mitre-attack", "blue-team", "nftables", "pf"]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "Environment :: Win32 (MS Windows)",
     "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
     "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Security",
+    "Topic :: System :: Monitoring",
 ]
 dependencies = [
     "flet==0.86.*",

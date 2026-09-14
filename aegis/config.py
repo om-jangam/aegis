@@ -3,6 +3,7 @@
 All runtime state (database, logs, config, ML model) lives under a single
 per-user application-data directory so the packaged executable never needs to
 write next to itself (which would require admin rights on Program Files).
+The directory itself is chosen per-platform by :mod:`aegis.platforms`.
 """
 from __future__ import annotations
 
@@ -12,20 +13,12 @@ import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from aegis.platforms import data_dir
+
 # Guards the atomic config write against concurrent savers (UI + workers).
 _SAVE_LOCK = threading.Lock()
 
-
-def _app_data_dir() -> Path:
-    """Return the per-user data directory, creating it if needed."""
-    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
-    root = Path(base) if base else Path.home()
-    path = root / "Aegis"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-DATA_DIR: Path = _app_data_dir()
+DATA_DIR: Path = data_dir()
 DB_PATH: Path = DATA_DIR / "aegis.db"
 LOG_DIR: Path = DATA_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)

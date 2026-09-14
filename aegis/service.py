@@ -21,7 +21,8 @@ from aegis.config import settings
 from aegis.core.events import Event
 from aegis.core.models import Alert, AuditEvent, Finding, FirewallRule, Severity
 from aegis.detection.engine import DetectionEngine
-from aegis.response.firewall import FirewallManager, FirewallResponder
+from aegis.response.factory import get_firewall
+from aegis.response.firewall import FirewallResponder
 from aegis.storage.database import SQLiteEventStore
 
 log = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ class SecurityService:
         self.store = store or SQLiteEventStore()
         self.engine = engine or DetectionEngine()
         self.notifier = notifier or Notifier()
-        self.firewall = firewall or FirewallManager()
+        self.firewall = firewall or get_firewall()
         self.responder = FirewallResponder(self.firewall)
         if ml == "default":
             from aegis.detection.ml_assist import MLAssist

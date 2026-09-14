@@ -1,4 +1,4 @@
-"""Secure Windows Firewall engine (the "ACT" plane).
+"""Secure Windows Firewall engine — the Windows implementation of the "ACT" plane.
 
 This is the hardened replacement for the original project's `netsh` code, which
 built command *strings* with raw user input and ran them through ``shell=True``
@@ -22,14 +22,16 @@ Two public types:
 Known limitation: parsing ``netsh`` text output is oriented to English-locale
 field names. The locale-independent path is the Windows COM API
 (``INetFwPolicy2``), noted as future work in ``docs/ARCHITECTURE.md``.
+
+The Linux and macOS equivalents live in :mod:`aegis.response.linux` and
+:mod:`aegis.response.macos`; all three implement
+:class:`~aegis.response.backend.FirewallBackend`.
 """
 from __future__ import annotations
 
 import logging
 import re
 import subprocess
-from collections.abc import Callable
-from dataclasses import dataclass
 
 from aegis import LEGACY_RULE_TAG, RULE_TAG
 from aegis.core import validators
@@ -41,61 +43,45 @@ from aegis.core.models import (
     Protocol,
 )
 from aegis.core.validators import ValidationError
+from aegis.platforms import NO_WINDOW, is_elevated, is_windows, which
+from aegis.response.backend import FirewallBackend
 from aegis.response.base import Responder, ResponseResult
+from aegis.response.command import (
+    CommandRunner,
+    FirewallError,
+    FirewallResult,
+    RunResult,
+    decode,
+    default_runner,
+)
 
 log = logging.getLogger(__name__)
 
-# Avoid a console window flashing when frozen as a windowed PyInstaller app.
-_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+# Re-exported under their historical private names so existing callers and the
+# security test-suite keep importing them from here.
+_NO_WINDOW = NO_WINDOW
+_default_runner = default_runner
+
+__all__ = [
+    "CommandRunner", "FirewallError", "FirewallManager", "FirewallResponder",
+    "FirewallResult", "RunResult", "is_admin",
+]
 
 _NETSH = ["netsh", "advfirewall", "firewall"]
 
 
-@dataclass
-class RunResult:
-    """Minimal, decode-agnostic result of running a command."""
+class FirewallManager(FirewallBackend):
+    """Safe wrapper around ``netsh advfirewall firewall`` (Windows backend)."""
 
-    returncode: int
-    stdout: bytes = b""
-    stderr: bytes = b""
-
-
-@dataclass
-class FirewallResult:
-    """Typed outcome of a firewall operation (replaces the original magic ints)."""
-
-    ok: bool
-    message: str
-    needs_admin: bool = False
-    rule_name: str = ""
-
-
-# A command runner takes an argv list + timeout and returns a RunResult.
-CommandRunner = Callable[[list[str], int], RunResult]
-
-
-def _default_runner(args: list[str], timeout: int) -> RunResult:
-    """Run a command securely: argument list, no shell, no console window."""
-    proc = subprocess.run(
-        args,
-        capture_output=True,
-        shell=False,                 # <- the core security property
-        timeout=timeout,
-        creationflags=_NO_WINDOW,
-    )
-    return RunResult(proc.returncode, proc.stdout or b"", proc.stderr or b"")
-
-
-class FirewallError(Exception):
-    pass
-
-
-class FirewallManager:
-    """Safe wrapper around ``netsh advfirewall firewall``."""
+    backend_name = "Windows Firewall (netsh)"
+    required_binary = "netsh"
 
     def __init__(self, runner: CommandRunner | None = None, timeout: int = 20):
-        self._run_cmd: CommandRunner = runner or _default_runner
+        self._run_cmd: CommandRunner = runner or default_runner
         self._timeout = timeout
+
+    def available(self) -> bool:
+        return is_windows() and which("netsh") is not None
 
     # -- low level ---------------------------------------------------------- #
     def _run(self, args: list[str]) -> RunResult:
@@ -106,15 +92,7 @@ class FirewallManager:
         except FileNotFoundError as exc:
             raise FirewallError("`netsh` not found — Aegis requires Windows.") from exc
 
-    @staticmethod
-    def _decode(data: bytes) -> str:
-        """Decode netsh output tolerant of the active OEM/ANSI code page."""
-        for enc in ("utf-8", "cp1252", "cp437", "latin-1"):
-            try:
-                return data.decode(enc)
-            except UnicodeDecodeError:
-                continue
-        return data.decode("utf-8", errors="replace")
+    _decode = staticmethod(decode)
 
     # -- argument building (pure, validated, testable) ---------------------- #
     def _build_add_args(self, rule: FirewallRule) -> list[str]:
@@ -349,12 +327,20 @@ def _extract_ip(entity: str) -> str:
 
 
 class FirewallResponder(Responder):
-    """Contain a network-based finding by blocking its remote IP."""
+    """Contain a network-based finding by blocking its remote IP.
+
+    Platform-agnostic: it drives whichever :class:`FirewallBackend` it is given,
+    so the same containment logic works over netsh, nftables or pf.
+    """
 
     name = "firewall-block"
 
-    def __init__(self, manager: FirewallManager | None = None):
-        self._manager = manager or FirewallManager()
+    def __init__(self, manager: FirewallBackend | None = None):
+        if manager is None:
+            from aegis.response.factory import get_firewall
+
+            manager = get_firewall()
+        self._manager = manager
 
     def can_handle(self, finding: Finding) -> bool:
         ip = _extract_ip(finding.entity)
@@ -375,9 +361,10 @@ class FirewallResponder(Responder):
 
 
 def is_admin() -> bool:
-    """True if the current process has Administrator rights."""
-    try:
-        import ctypes
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except Exception:  # noqa: BLE001 - non-Windows or restricted environment
-        return False
+    """True if the current process can modify firewall state.
+
+    Administrator on Windows, root on Linux/macOS. Kept here as the historical
+    entry point; the platform-aware implementation lives in
+    :func:`aegis.platforms.is_elevated`.
+    """
+    return is_elevated()
