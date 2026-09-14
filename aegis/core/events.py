@@ -30,6 +30,9 @@ class EventType(StrEnum):
     NETWORK_LISTEN = "network_listen"
     PROCESS_START = "process_start"
     PROCESS_STOP = "process_stop"
+    FILE_CREATED = "file_created"
+    FILE_MODIFIED = "file_modified"
+    FILE_DELETED = "file_deleted"
 
 
 class EventSource(StrEnum):
@@ -39,6 +42,7 @@ class EventSource(StrEnum):
     SYSMON = "sysmon"          # Sysinternals Sysmon event log (high fidelity)
     ETW = "etw"                # Event Tracing for Windows (kernel-grade)
     FIREWALL = "firewall"      # Windows Firewall / netsh
+    FILESYSTEM = "filesystem"  # file integrity baseline comparison
     SYSTEM = "system"          # Aegis itself
 
 
@@ -112,3 +116,33 @@ class ProcessEvent(Event):
 
     def summary(self) -> str:
         return f"{self.name or '?'} (pid={self.pid}, ppid={self.ppid})"
+
+
+@dataclass(frozen=True)
+class FileEvent(Event):
+    """A watched file was created, modified or deleted.
+
+    ``digest`` is the content hash after the change (empty for a deletion) and
+    ``previous_digest`` the one before it. Carrying both is what lets an analyst
+    prove *what* changed, not merely that something did.
+    """
+
+    path: str = ""
+    size: int = 0
+    previous_size: int = 0
+    digest: str = ""
+    previous_digest: str = ""
+    mode: str = ""
+
+    @property
+    def action(self) -> str:
+        return {
+            EventType.FILE_CREATED: "created",
+            EventType.FILE_MODIFIED: "modified",
+            EventType.FILE_DELETED: "deleted",
+        }.get(self.type, "changed")
+
+    def summary(self) -> str:
+        detail = f" ({self.previous_size} -> {self.size} bytes)" \
+            if self.type == EventType.FILE_MODIFIED else ""
+        return f"{self.path} {self.action}{detail}"

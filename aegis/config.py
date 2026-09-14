@@ -38,6 +38,14 @@ class Settings:
     process_poll_interval: float = 3.0      # seconds between process scans
     monitoring_enabled: bool = True
 
+    # File integrity monitoring
+    fim_enabled: bool = True
+    # Filesystem scans are far heavier than a socket table read, so FIM polls on
+    # its own, much longer interval rather than sharing the process one.
+    fim_poll_interval: float = 60.0
+    # Empty means "use the platform defaults" from collectors.filesystem.
+    fim_paths: list[str] = field(default_factory=list)
+
     # Threat detection
     anomaly_detection_enabled: bool = True
     threat_score_alert_threshold: int = 70  # 0-100; >= this raises an alert

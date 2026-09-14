@@ -15,6 +15,7 @@ import threading
 
 from aegis.alerting.notifier import Notifier
 from aegis.collectors.base import Collector
+from aegis.collectors.filesystem import FileIntegrityCollector
 from aegis.collectors.network import NetworkCollector
 from aegis.collectors.processes import ProcessCollector
 from aegis.config import settings
@@ -52,7 +53,9 @@ class SecurityService:
             from aegis.detection.ml_assist import MLAssist
             ml = MLAssist()
         self.ml = ml                      # MLAssist or None
-        self.collectors: list[Collector] = collectors or [NetworkCollector(), ProcessCollector()]
+        self.collectors: list[Collector] = collectors or [
+            NetworkCollector(), ProcessCollector(), FileIntegrityCollector(),
+        ]
         self.auto_respond = auto_respond
 
         self._threads: list[threading.Thread] = []
@@ -122,6 +125,10 @@ class SecurityService:
     def _interval_for(self, collector: Collector) -> float:
         if collector.name == "processes":
             return max(1.0, settings.process_poll_interval)
+        if collector.name == "filesystem":
+            # Walking and hashing a tree is orders of magnitude heavier than
+            # reading the socket table, so FIM runs on its own slow interval.
+            return max(10.0, settings.fim_poll_interval)
         return max(0.5, settings.network_poll_interval)
 
     def _run_collector(self, collector: Collector) -> None:
