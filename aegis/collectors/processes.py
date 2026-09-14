@@ -11,7 +11,7 @@ Provides two things:
 from __future__ import annotations
 
 import logging
-import os
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
@@ -22,10 +22,40 @@ from aegis.core.events import EventSource, EventType, ProcessEvent
 
 log = logging.getLogger(__name__)
 
-# Locations legitimate long-running network software rarely runs from.
-_SUSPICIOUS_DIRS = ("\\temp\\", "\\tmp\\", "\\appdata\\local\\temp",
-                    "\\downloads\\", "\\$recycle.bin")
-_SYSTEM_NAMES = {"svchost.exe", "lsass.exe", "services.exe", "csrss.exe", "winlogon.exe"}
+# Locations legitimate long-running network software rarely runs from. Matched
+# against a separator-normalised path so one list covers every platform.
+_SUSPICIOUS_DIRS = ("/temp/", "/tmp/", "/appdata/local/temp", "/downloads/",
+                    "/$recycle.bin", "/var/tmp/", "/dev/shm/", "/.cache/")
+
+# Processes whose *name* is impersonated by malware, paired with the directories
+# the genuine binary must live in. Checked for every platform's names regardless
+# of the host OS: an `svchost.exe` on a Linux box is just as wrong as one in a
+# user's Downloads folder.
+_SYSTEM_PROCESSES: tuple[tuple[frozenset[str], tuple[str, ...]], ...] = (
+    (frozenset({"svchost.exe", "lsass.exe", "services.exe", "csrss.exe",
+                "winlogon.exe", "smss.exe", "wininit.exe", "explorer.exe"}),
+     ("/windows/",)),
+    (frozenset({"systemd", "init", "sshd", "cron", "crond", "dbus-daemon",
+                "udevd", "rsyslogd", "journald"}),
+     ("/usr/", "/sbin/", "/bin/", "/lib/", "/libexec/")),
+    (frozenset({"launchd", "kernel_task", "mds", "mdworker", "windowserver",
+                "securityd", "coreaudiod", "distnoted"}),
+     ("/usr/", "/system/", "/sbin/", "/bin/", "/library/")),
+)
+
+# Absolute-path forms across platforms: POSIX (/x), UNC (\\host\share) and
+# Windows drive-letter (C:\x). os.path.isabs() only recognises the host OS's
+# form, which would misjudge paths from the other platform under test or in CI.
+_ABSOLUTE_RE = re.compile(r"^(?:/|\\\\|[A-Za-z]:[\\/])")
+
+
+def _normalise(path: str) -> str:
+    """Lower-case a path and use forward slashes, so one match list fits all OSes."""
+    return (path or "").replace("\\", "/").lower()
+
+
+def _looks_absolute(path: str) -> bool:
+    return bool(_ABSOLUTE_RE.match(path or ""))
 
 
 @dataclass
@@ -45,15 +75,25 @@ class ProcessInfo:
 
 
 def flag_reasons(exe: str, name: str) -> list[str]:
-    """Heuristic suspicion flags for a process (used by rules and the UI)."""
+    """Heuristic suspicion flags for a process (used by rules and the UI).
+
+    Platform-agnostic: the checks are expressed over a normalised path, so the
+    same heuristics apply whether the host is Windows, Linux or macOS.
+    """
     reasons: list[str] = []
-    low = (exe or "").lower()
+    low = _normalise(exe)
     if any(d in low for d in _SUSPICIOUS_DIRS):
         reasons.append("Runs from a temporary/download directory")
-    if exe and not os.path.isabs(exe):
+    if exe and not _looks_absolute(exe):
         reasons.append("Executable path is not absolute")
-    if name.lower() in _SYSTEM_NAMES and low and "\\windows\\" not in low:
-        reasons.append(f"System-like name '{name}' outside the Windows directory")
+
+    lowered_name = (name or "").lower()
+    for names, system_dirs in _SYSTEM_PROCESSES:
+        if lowered_name in names and low and not any(d in low for d in system_dirs):
+            reasons.append(
+                f"System-like name '{name}' outside its expected system directory"
+            )
+            break
     return reasons
 
 

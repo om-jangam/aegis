@@ -23,6 +23,54 @@ def test_flag_reasons_clean_process():
     assert flag_reasons(r"C:\Windows\System32\svchost.exe", "svchost.exe") == []
 
 
+# --- cross-platform heuristics ----------------------------------------------
+# These must hold identically on every OS, including in CI, so the checks are
+# written over both path styles regardless of the host running the suite.
+def test_flag_reasons_linux_temp_dir():
+    assert any("temporary" in r.lower()
+               for r in flag_reasons("/tmp/evil", "evil"))
+
+
+def test_flag_reasons_linux_shared_memory_dir():
+    assert any("temporary" in r.lower()
+               for r in flag_reasons("/dev/shm/payload", "payload"))
+
+
+def test_flag_reasons_linux_clean_system_process():
+    assert flag_reasons("/usr/lib/systemd/systemd", "systemd") == []
+
+
+def test_flag_reasons_linux_masquerade():
+    assert any("system-like" in r.lower()
+               for r in flag_reasons("/home/user/systemd", "systemd"))
+
+
+def test_flag_reasons_macos_clean_system_process():
+    assert flag_reasons("/sbin/launchd", "launchd") == []
+
+
+def test_flag_reasons_macos_masquerade():
+    assert any("system-like" in r.lower()
+               for r in flag_reasons("/Users/me/Downloads/launchd", "launchd"))
+
+
+def test_windows_binary_on_posix_path_is_masquerade():
+    """A Windows system name outside a Windows directory is wrong anywhere."""
+    assert any("system-like" in r.lower()
+               for r in flag_reasons("/opt/app/svchost.exe", "svchost.exe"))
+
+
+def test_absolute_path_detection_is_platform_independent():
+    """os.path.isabs() only understands the host OS; these must not be flagged."""
+    for path in (r"C:\Windows\System32\foo.exe", "/usr/bin/foo", r"\\server\share\foo.exe"):
+        assert not any("not absolute" in r for r in flag_reasons(path, "foo")), path
+
+
+def test_relative_path_is_flagged_on_any_platform():
+    assert any("not absolute" in r for r in flag_reasons("evil.exe", "evil.exe"))
+    assert any("not absolute" in r for r in flag_reasons("./evil", "evil"))
+
+
 # --- live, read-only --------------------------------------------------------
 def test_network_collector_emits_events():
     col = NetworkCollector()
