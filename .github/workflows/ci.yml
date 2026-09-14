@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  test:
+    name: Lint & test (Windows)
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install project + dev tooling
+        # Install the package with its real dependencies (psutil, scikit-learn,
+        # numpy, win11toast, flet…) so the test suite can import every module,
+        # plus the dev tools. Installing the package also validates the metadata.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check aegis tests evaluation
+
+      - name: Run tests
+        run: pytest --cov=aegis --cov-report=term-missing
