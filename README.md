@@ -16,8 +16,9 @@
 
 ## Install on Windows (no Python needed)
 
-1. Download **`Aegis-Setup-<version>.exe`** (from a release, or the
-   `aegis-windows-installer` artifact of the latest CI run).
+1. Download **`Aegis-Setup-<version>.exe`**: the `aegis-windows-installer`
+   artifact of a release-tag CI run, or of a manual run (Actions > CI >
+   Run workflow).
 2. Double-click it and follow the steps. No administrator rights are needed.
 3. Open **Aegis** from the Start menu. A short welcome guide shows where to begin.
 

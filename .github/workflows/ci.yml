@@ -1,9 +1,21 @@
 name: CI
 
+# Private repositories get a monthly budget of Actions minutes, and Windows and
+# macOS runners consume it 2x and 10x faster than Linux. Everyday pushes and
+# pull requests therefore run the Linux suite only; the full cross-platform
+# matrix and the Windows installer run for release tags or on demand
+# (Actions tab > CI > Run workflow).
 on:
   push:
     branches: [ main, master ]
+    tags: [ "v*" ]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Also test on Windows and macOS and build the Windows installer"
+        type: boolean
+        default: true
 
 concurrency:
   # A new push supersedes an in-flight run on the same ref.
@@ -12,20 +24,12 @@ concurrency:
 
 jobs:
   test:
-    name: ${{ matrix.os }} · Python ${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
+    name: ubuntu-latest · Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # Aegis claims to run on all three desktop platforms; the matrix is what
-        # makes that claim verifiable rather than aspirational. The full Python
-        # range is exercised on Linux, with the edges covered elsewhere to keep
-        # the matrix affordable.
-        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.11", "3.12", "3.13"]
-        exclude:
-          - { os: windows-latest, python-version: "3.12" }
-          - { os: macos-latest, python-version: "3.12" }
 
     steps:
       - uses: actions/checkout@v4
@@ -37,15 +41,12 @@ jobs:
           cache: pip
 
       - name: Install project + dev tooling
-        # Install the package with its real dependencies (psutil, scikit-learn,
-        # numpy, win11toast, flet…) so the test suite can import every module,
-        # plus the dev tools. Installing the package also validates the metadata.
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
       - name: Lint (ruff)
-        run: ruff check aegis tests evaluation
+        run: ruff check aegis tests evaluation packaging
 
       - name: Run tests
         # Keep test state out of the real user profile on every runner.
@@ -53,9 +54,41 @@ jobs:
           AEGIS_DATA_DIR: ${{ runner.temp }}/aegis-data
         run: pytest --cov=aegis --cov-report=term-missing
 
+  test-desktop:
+    name: ${{ matrix.os }} · Python ${{ matrix.python-version }}
+    # Aegis claims to run on all three desktop platforms; this job keeps that
+    # claim verifiable for every release without spending minutes on each push.
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.full)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install project + dev tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        env:
+          AEGIS_DATA_DIR: ${{ runner.temp }}/aegis-data
+        run: pytest
+
   windows-installer:
     name: Windows installer
-    needs: test
+    needs: [test, test-desktop]
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.full)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
