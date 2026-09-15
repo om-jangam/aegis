@@ -136,6 +136,32 @@ def listening_sockets() -> list[Listener]:
     return out
 
 
+def _registry_values(hive: str, key_path: str) -> dict[str, object] | None:
+    """All values under a key in HKLM or HKCU; None if the key cannot be opened."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    root = {"HKLM": winreg.HKEY_LOCAL_MACHINE, "HKCU": winreg.HKEY_CURRENT_USER}.get(hive)
+    if root is None:
+        return None
+    values: dict[str, object] = {}
+    try:
+        access = winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0)
+        with winreg.OpenKey(root, key_path, 0, access) as key:
+            index = 0
+            while True:
+                try:
+                    name, value, _ = winreg.EnumValue(key, index)
+                except OSError:
+                    break
+                values[name] = value
+                index += 1
+    except OSError:
+        return None
+    return values
+
+
 _getenv = os.environ.get
 
 
@@ -150,8 +176,10 @@ class PostureContext:
     read_text: Callable[[str], str | None] = _read_text
     stat_mode: Callable[[str], int | None] = _stat_mode
     read_registry: Callable[[str, str], object] = _read_registry
+    registry_values: Callable[[str, str], dict[str, object] | None] = _registry_values
     glob: Callable[[str], list[str]] = _glob.glob
     env: Callable[[str], str | None] = _getenv
+    now: Callable[[], datetime] = datetime.now
 
     def run(self, args: list[str], timeout: int = 20) -> tuple[int, str] | None:
         """Run a fixed, read-only command. None when it could not run at all."""

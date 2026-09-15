@@ -9,6 +9,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import stat
+from datetime import datetime
 
 from aegis.core.models import Severity
 from aegis.platforms import OS
@@ -516,10 +517,194 @@ class SensitiveFilePermissionsCheck(PostureCheck):
         return self.result(CheckStatus.PASS, f"{checked} sensitive files have safe permissions.")
 
 
+# --------------------------------------------------------------------------- #
+# Patching
+# --------------------------------------------------------------------------- #
+class SystemUpdatesCheck(PostureCheck):
+    check_id = "POSTURE-UPDATES"
+    title = "Operating system updates are current"
+    category = "Patching"
+    severity = Severity.HIGH
+    platforms = (OS.WINDOWS, OS.LINUX)
+    #: Windows ships security fixes monthly; two missed cycles is a failure.
+    WARN_DAYS = 35
+    FAIL_DAYS = 60
+    _HOTFIX_SCRIPT = (
+        "$h = Get-HotFix | Where-Object { $_.InstalledOn } | Sort-Object InstalledOn "
+        "-Descending | Select-Object -First 1; "
+        "if ($h) { $h.InstalledOn.ToString('yyyy-MM-dd') + ' ' + $h.HotFixID }")
+
+    def run(self, ctx: PostureContext) -> CheckResult:
+        return self._windows(ctx) if ctx.os is OS.WINDOWS else self._linux(ctx)
+
+    def _windows(self, ctx: PostureContext) -> CheckResult:
+        out = ctx.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                       self._HOTFIX_SCRIPT], timeout=60)
+        match = re.search(r"(\d{4}-\d{2}-\d{2})\s+(\S+)", out[1]) if out else None
+        if not match:
+            return self.result(CheckStatus.SKIP, "Could not read the Windows update history.")
+        days = (ctx.now() - datetime.strptime(match.group(1), "%Y-%m-%d")).days
+        details = [f"Most recent update: {match.group(2)}, installed {match.group(1)}"]
+        fix = "Open Settings > Windows Update, install everything offered, and restart."
+        if days > self.FAIL_DAYS:
+            return self.result(CheckStatus.FAIL,
+                               f"No Windows update has been installed for {days} days.",
+                               details, remediation=fix)
+        if days > self.WARN_DAYS:
+            return self.result(CheckStatus.WARN,
+                               f"The last Windows update was installed {days} days ago.",
+                               details, remediation=fix, severity=Severity.MEDIUM)
+        return self.result(CheckStatus.PASS,
+                           f"Windows was updated {max(days, 0)} day(s) ago.", details)
+
+    def _linux(self, ctx: PostureContext) -> CheckResult:
+        reboot_pending = ctx.read_text("/var/run/reboot-required") is not None
+
+        apt = ctx.run(["apt", "list", "--upgradable"], timeout=60)
+        if apt and apt[0] == 0:
+            pending = [line for line in apt[1].splitlines() if "[upgradable" in line]
+            security = [line.split("/", 1)[0] for line in pending if "-security" in line]
+            return self._package_verdict(
+                len(pending), security, reboot_pending,
+                fix="Run: sudo apt update && sudo apt upgrade, then restart if asked. "
+                    "Enable automatic security updates with: sudo apt install "
+                    "unattended-upgrades")
+
+        # -C uses the local metadata cache: fast, and no network access.
+        dnf = ctx.run(["dnf", "-C", "-q", "check-update"], timeout=60)
+        if dnf and dnf[0] in (0, 100):
+            count = 0
+            if dnf[0] == 100:
+                count = sum(1 for line in dnf[1].splitlines()
+                            if line.strip() and not line.startswith(" "))
+            return self._package_verdict(count, [], reboot_pending,
+                                         fix="Run: sudo dnf upgrade, then restart if asked.")
+
+        return self.result(CheckStatus.SKIP, "No supported package manager (apt, dnf) was found.")
+
+    def _package_verdict(self, pending: int, security: list[str], reboot_pending: bool,
+                         fix: str) -> CheckResult:
+        details: list[str] = []
+        if security:
+            shown = ", ".join(security[:10]) + (" ..." if len(security) > 10 else "")
+            details.append(f"Security updates: {shown}")
+        if reboot_pending:
+            details.append("A restart is required to finish installing updates")
+        if security:
+            return self.result(CheckStatus.FAIL,
+                               f"{len(security)} security update(s) are waiting to be installed.",
+                               details, remediation=fix)
+        if pending:
+            return self.result(CheckStatus.WARN, f"{pending} package update(s) are waiting.",
+                               details, remediation=fix, severity=Severity.MEDIUM)
+        if reboot_pending:
+            return self.result(CheckStatus.WARN,
+                               "Updates are installed but a restart is still required.",
+                               details, remediation="Restart the machine.",
+                               severity=Severity.MEDIUM)
+        return self.result(CheckStatus.PASS,
+                           "All packages are up to date (as of the last package index refresh).")
+
+
+# --------------------------------------------------------------------------- #
+# Persistence
+# --------------------------------------------------------------------------- #
+_SUSPICIOUS_COMMANDS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"%te?mp%|\\appdata\\local\\temp\\|\\windows\\temp\\|\\downloads\\"
+                r"|\\users\\public\\|(^|[\s\"'=])/(tmp|var/tmp|dev/shm)/", re.IGNORECASE),
+     "runs from a temporary, downloads or shared folder"),
+    (re.compile(r"\b(powershell|pwsh)(\.exe)?\b.*\s[-/](e|ec|en|enc\w*)\s", re.IGNORECASE),
+     "runs encoded PowerShell"),
+    (re.compile(r"\b(powershell|pwsh)(\.exe)?\b.*\s[-/]w(indowstyle)?\s+hidden", re.IGNORECASE),
+     "runs a hidden PowerShell window"),
+    (re.compile(r"\b(mshta|rundll32|regsvr32|wscript|cscript|certutil|bitsadmin)(\.exe)?\b"
+                r".*https?://", re.IGNORECASE),
+     "loads code from the internet through a Windows system tool"),
+    (re.compile(r"\b(curl|wget)\b[^|;]*\|\s*(sudo\s+)?(ba|z|da)?sh\b", re.IGNORECASE),
+     "downloads a script from the internet and runs it"),
+    (re.compile(r"/dev/tcp/|\bn(c|cat)\b.*\s-e\s", re.IGNORECASE),
+     "opens a reverse shell"),
+)
+
+
+def suspicious_reasons(command: str) -> list[str]:
+    """Why a startup command looks like malware persistence (empty if it does not)."""
+    return [reason for pattern, reason in _SUSPICIOUS_COMMANDS if pattern.search(command)]
+
+
+class StartupProgramsCheck(PostureCheck):
+    check_id = "POSTURE-STARTUP"
+    title = "Startup programs look legitimate"
+    category = "Persistence"
+    severity = Severity.HIGH
+    platforms = (OS.WINDOWS, OS.LINUX)
+    remediation = ("Look up each flagged entry. If you did not set it up, remove it (Task "
+                   "Manager > Startup apps, the registry value, or the cron line) and run a "
+                   "full antivirus scan.")
+    RUN_KEYS: tuple[tuple[str, str], ...] = (
+        ("HKLM", r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"),
+        ("HKLM", r"SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"),
+        ("HKLM", r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run"),
+        ("HKCU", r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"),
+        ("HKCU", r"SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"),
+    )
+    CRON_FILES = ("/etc/crontab", "/etc/cron.d/*", "/var/spool/cron/crontabs/*",
+                  "/var/spool/cron/*")
+    _CRON_ENV = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\s*=")
+
+    def run(self, ctx: PostureContext) -> CheckResult:
+        entries = self._windows_entries(ctx) if ctx.os is OS.WINDOWS else self._cron_entries(ctx)
+        if entries is None:
+            return self.result(CheckStatus.SKIP, "Could not read any startup entries.")
+        flagged = []
+        for where, command in entries:
+            reasons = suspicious_reasons(command)
+            if reasons:
+                shown = command if len(command) <= 160 else command[:157] + "..."
+                flagged.append(f"{where}: {shown} ({'; '.join(reasons)})")
+        if flagged:
+            return self.result(CheckStatus.FAIL,
+                               f"{len(flagged)} startup entry(ies) look like malware persistence.",
+                               flagged)
+        return self.result(CheckStatus.PASS,
+                           f"{len(entries)} startup entries reviewed; none look suspicious.")
+
+    def _windows_entries(self, ctx: PostureContext) -> list[tuple[str, str]] | None:
+        entries: list[tuple[str, str]] = []
+        readable = False
+        for hive, key in self.RUN_KEYS:
+            values = ctx.registry_values(hive, key)
+            if values is None:
+                continue
+            readable = True
+            label = f"{hive}\\...\\{key.rsplit(chr(92), 1)[-1]}"
+            entries.extend((f"{label}\\{name}", str(value)) for name, value in values.items())
+        return entries if readable else None
+
+    def _cron_entries(self, ctx: PostureContext) -> list[tuple[str, str]] | None:
+        paths: list[str] = []
+        for pattern in self.CRON_FILES:
+            paths.extend(sorted(ctx.glob(pattern)) if "*" in pattern else [pattern])
+        entries: list[tuple[str, str]] = []
+        readable = False
+        for path in dict.fromkeys(paths):
+            text = ctx.read_text(path)
+            if text is None:
+                continue
+            readable = True
+            for line in text.splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and not self._CRON_ENV.match(line):
+                    entries.append((path, line))
+        return entries if readable else None
+
+
 def default_checks() -> list[PostureCheck]:
     return [
         FirewallEnabledCheck(),
         ExposedServicesCheck(),
+        SystemUpdatesCheck(),
+        StartupProgramsCheck(),
         DefenderRealtimeCheck(),
         UserAccountControlCheck(),
         RemoteDesktopCheck(),

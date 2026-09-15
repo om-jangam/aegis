@@ -19,6 +19,13 @@ All notable changes to Aegis are documented here. The format is based on
   fix, threat-intel status and a one-click "Update blocklists" button. Checks
   and downloads run in the background so the window stays responsive.
 - Settings switch to turn threat-intelligence matching on or off.
+- Posture check **OS updates** (`POSTURE-UPDATES`): days since the last Windows
+  update (warn after 35, fail after 60); pending security updates and required
+  restarts on Linux via the local apt / dnf cache, with no network access.
+- Posture check **startup programs** (`POSTURE-STARTUP`): flags Windows Run /
+  RunOnce entries and Linux cron jobs that launch from temp or download folders,
+  run encoded or hidden PowerShell, pull code through system tools, pipe
+  `curl` into a shell, or open a reverse shell.
 
 ### Changed
 - Console live-refresh now selects views by type instead of sidebar position,
