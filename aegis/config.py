@@ -75,6 +75,10 @@ class Settings:
     # Data retention
     event_retention_days: int = 30
 
+    # Programs the user trusts: no alerts about them or what they start
+    # (findings are still recorded). See aegis.detection.trust.
+    trusted_programs: list[str] = field(default_factory=list)
+
     # Known-safe / trusted destinations (never alerted on)
     trusted_remote_ips: list[str] = field(default_factory=lambda: [
         "127.0.0.1", "::1", "0.0.0.0",

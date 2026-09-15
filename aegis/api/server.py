@@ -181,7 +181,8 @@ def _alert_dict(alert) -> dict:
         "id": alert.id, "ts": alert.timestamp.isoformat(timespec="seconds"),
         "title": alert.title, "message": alert.message, "severity": alert.severity.value,
         "source": alert.source, "technique": alert.technique, "score": alert.score,
-        "acknowledged": alert.acknowledged,
+        "acknowledged": alert.acknowledged, "process_name": alert.process_name,
+        "parent_name": alert.parent_name,
     }
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import flet as ft
 
 from aegis.config import settings
+from aegis.core.models import Severity
 from aegis.ui import components as c
 from aegis.ui import theme
 from aegis.ui.views.base import BaseView
@@ -25,6 +26,8 @@ class SettingsView(BaseView):
         self.net_interval = ft.TextField(value=str(settings.network_poll_interval), width=100,
                                          border_color=theme.BORDER, color=theme.TEXT,
                                          keyboard_type=ft.KeyboardType.NUMBER)
+        self.trusted_list = ft.Column(spacing=6, tight=True)
+        self._render_trusted()
 
         def row(label, desc, control):
             return ft.Container(
@@ -68,6 +71,14 @@ class SettingsView(BaseView):
                     self.auto_respond),
             ], spacing=10)),
             c.panel(ft.Column([
+                c.section_title("Trusted programs", ft.Icons.VERIFIED_OUTLINED),
+                ft.Text("Aegis does not alert about these programs or anything they start "
+                        "(what they do is still recorded). Add one from an alert with "
+                        "\"Trust\"; remove it here to be alerted again.", size=12,
+                        color=theme.TEXT_MUTED),
+                self.trusted_list,
+            ], spacing=10)),
+            c.panel(ft.Column([
                 c.section_title("Advanced", ft.Icons.TUNE),
                 row("Network check interval (seconds)",
                     "How often Aegis looks at network connections. Lower uses more CPU.",
@@ -79,6 +90,33 @@ class SettingsView(BaseView):
             ft.FilledButton("Save settings", icon=ft.Icons.SAVE, on_click=self._save),
             ft.Container(height=20),
         ], spacing=14, scroll=ft.ScrollMode.AUTO, expand=True)
+
+    def refresh(self) -> None:
+        self._render_trusted()
+        self.safe_update()
+
+    def _render_trusted(self) -> None:
+        self.trusted_list.controls = [
+            ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.Icons.VERIFIED_OUTLINED, color=theme.OK, size=18),
+                    ft.Text(name, size=14, color=theme.TEXT, expand=True),
+                    ft.OutlinedButton("Stop trusting", icon=ft.Icons.REMOVE_CIRCLE_OUTLINE,
+                                      on_click=lambda e, n=name: self._untrust(n)),
+                ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+                bgcolor=theme.SURFACE_ALT, border_radius=8)
+            for name in settings.trusted_programs
+        ] or [ft.Text("No trusted programs. Every program is watched.", size=13,
+                      color=theme.TEXT_MUTED)]
+
+    def _untrust(self, name: str) -> None:
+        settings.trusted_programs = [t for t in settings.trusted_programs if t != name]
+        settings.save()
+        self.service.audit("SYSTEM", "program_untrusted", Severity.INFO,
+                           f"Stopped trusting {name}")
+        self.app.toast(f"{name} is no longer trusted. Aegis will alert about it again.", ok=True)
+        self.refresh()
 
     def _save(self, e=None) -> None:
         try:

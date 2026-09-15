@@ -114,8 +114,16 @@ class ProcessEvent(Event):
     cmdline: str = ""
     username: str = ""
 
+    @property
+    def parent_name(self) -> str:
+        """Name of the process that started this one, when the collector knew it."""
+        return str((self.raw or {}).get("parent_name") or "")
+
     def summary(self) -> str:
-        return f"{self.name or '?'} (pid={self.pid}, ppid={self.ppid})"
+        name = self.name or "?"
+        if self.parent_name:
+            return f"{name} (pid {self.pid}), started by {self.parent_name} (pid {self.ppid})"
+        return f"{name} (pid {self.pid}, parent pid {self.ppid})"
 
 
 @dataclass(frozen=True)

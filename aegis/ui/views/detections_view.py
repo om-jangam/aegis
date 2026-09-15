@@ -3,10 +3,21 @@ from __future__ import annotations
 
 import flet as ft
 
+from aegis.config import settings
+from aegis.core.models import Severity
+from aegis.detection.trust import normalise, trust_candidate
 from aegis.ui import components as c
 from aegis.ui import theme
 from aegis.ui.plain import advice_for_alert, plural, time_ago
 from aegis.ui.views.base import BaseView
+
+
+def program_line(process_name: str, parent_name: str) -> str:
+    if process_name and parent_name:
+        return f"Program: {process_name}, started by {parent_name}"
+    if process_name:
+        return f"Program: {process_name}"
+    return ""
 
 
 class DetectionsView(BaseView):
@@ -42,9 +53,17 @@ class DetectionsView(BaseView):
     def _row(self, a) -> ft.Control:
         color = theme.SEVERITY_COLOR.get(a.severity, theme.INFO)
         what_happened = a.message.splitlines()[0] if a.message else ""
-        review = (c.pill("Reviewed", theme.OK) if a.acknowledged else
-                  ft.TextButton("Mark as reviewed", icon=ft.Icons.CHECK,
-                                on_click=lambda e, i=a.id: self._review(i)))
+        actions: list[ft.Control] = []
+        candidate = trust_candidate(a.process_name, a.parent_name)
+        trusted = {normalise(t) for t in settings.trusted_programs}
+        if candidate and normalise(candidate) not in trusted:
+            actions.append(ft.TextButton(
+                f"Trust {candidate}", icon=ft.Icons.VERIFIED_OUTLINED,
+                tooltip=f"Stop alerts about {candidate} and the programs it starts",
+                on_click=lambda e, name=candidate, alert=a: self._confirm_trust(name, alert)))
+        actions.append(c.pill("Reviewed", theme.OK) if a.acknowledged else
+                       ft.TextButton("Mark as reviewed", icon=ft.Icons.CHECK,
+                                     on_click=lambda e, i=a.id: self._review(i)))
         lines: list[ft.Control] = [
             ft.Row([
                 c.severity_badge(a.severity),
@@ -52,9 +71,12 @@ class DetectionsView(BaseView):
                         expand=True, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS),
                 ft.Text(time_ago(a.timestamp), size=11, color=theme.TEXT_MUTED,
                         tooltip=a.timestamp.strftime("%Y-%m-%d %H:%M:%S")),
-                review,
+                *actions,
             ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ]
+        program = program_line(a.process_name, a.parent_name)
+        if program:
+            lines.append(ft.Text(program, size=13, color=theme.TEXT, selectable=True))
         if what_happened:
             lines.append(ft.Text(what_happened, size=12, color=theme.TEXT_MUTED, max_lines=2,
                                  overflow=ft.TextOverflow.ELLIPSIS, selectable=True))
@@ -78,6 +100,29 @@ class DetectionsView(BaseView):
     def _review(self, alert_id) -> None:
         self.service.store.acknowledge_alert(alert_id)
         self.refresh()
+
+    def _confirm_trust(self, name: str, alert) -> None:
+        def trust(e):
+            self.page.pop_dialog()
+            if normalise(name) not in {normalise(t) for t in settings.trusted_programs}:
+                settings.trusted_programs = [*settings.trusted_programs, name]
+                settings.save()
+            self.service.store.acknowledge_alert(alert.id)
+            self.service.audit("SYSTEM", "program_trusted", Severity.INFO,
+                               f"Trusted {name}",
+                               "No alerts about this program or the programs it starts")
+            self.app.toast(f"{name} is now trusted. You can undo this in Settings.", ok=True)
+            self.refresh()
+
+        self.page.show_dialog(ft.AlertDialog(
+            modal=True, title=ft.Text(f"Trust {name}?"),
+            content=ft.Text(
+                f"Aegis will stop alerting about {name} and the programs it starts. What "
+                f"they do is still recorded.\n\nOnly trust programs you installed yourself "
+                f"and recognise. You can remove it later in Settings.", width=460),
+            actions=[ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog()),
+                     ft.FilledButton(f"Trust {name}", icon=ft.Icons.VERIFIED_OUTLINED,
+                                     on_click=trust)]))
 
     def _confirm_review_all(self, e=None) -> None:
         waiting = self.service.store.stats()["open_alerts"]

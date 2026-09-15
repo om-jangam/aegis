@@ -20,14 +20,24 @@ from aegis.collectors.filesystem import FileIntegrityCollector
 from aegis.collectors.network import NetworkCollector
 from aegis.collectors.processes import ProcessCollector
 from aegis.config import settings
-from aegis.core.events import Event
+from aegis.core.events import Event, NetworkEvent, ProcessEvent
 from aegis.core.models import Alert, AuditEvent, Finding, FirewallRule, Severity
 from aegis.detection.engine import DetectionEngine
+from aegis.detection.trust import is_trusted
 from aegis.response.factory import get_firewall
 from aegis.response.firewall import FirewallResponder
 from aegis.storage.database import SQLiteEventStore
 
 log = logging.getLogger(__name__)
+
+
+def _attach_program(finding: Finding, event: Event) -> None:
+    """Record which program (and its parent) a finding is about, when rules did not."""
+    if isinstance(event, ProcessEvent):
+        finding.process_name = finding.process_name or event.name
+        finding.parent_name = finding.parent_name or event.parent_name
+    elif isinstance(event, NetworkEvent):
+        finding.process_name = finding.process_name or event.process_name
 
 
 def severity_for(score: int) -> Severity:
@@ -157,6 +167,7 @@ class SecurityService:
                 if ml_finding:
                     findings.append(ml_finding)
             for finding in findings:
+                _attach_program(finding, event)
                 self._handle_finding(finding)
             all_findings.extend(findings)
 
@@ -173,6 +184,8 @@ class SecurityService:
 
         threshold = settings.threat_score_alert_threshold
         if (finding.score >= threshold or finding.severity >= Severity.HIGH) \
+                and not is_trusted(finding.process_name, finding.parent_name,
+                                   settings.trusted_programs) \
                 and self._first_alert_in_window(finding):
             self._raise_alert(finding)
 
@@ -198,6 +211,8 @@ class SecurityService:
             source=finding.entity,
             technique=finding.attack_ref,
             score=finding.score,
+            process_name=finding.process_name,
+            parent_name=finding.parent_name,
         )
         alert.id = self.store.save_alert(alert)
         self.audit("DETECTION", "alert_raised", finding.severity,

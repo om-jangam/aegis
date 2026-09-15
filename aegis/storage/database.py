@@ -66,7 +66,9 @@ CREATE TABLE IF NOT EXISTS alerts (
     source       TEXT,
     technique    TEXT,
     score        INTEGER DEFAULT 0,
-    acknowledged INTEGER DEFAULT 0
+    acknowledged INTEGER DEFAULT 0,
+    process_name TEXT,
+    parent_name  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(ts);
 
@@ -84,6 +86,12 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_cat ON audit(category);
 """
 
+# Columns added after the first release. ``CREATE TABLE IF NOT EXISTS`` leaves an
+# existing table untouched, so databases from older versions gain them here.
+_ADDED_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
+    "alerts": (("process_name", "TEXT"), ("parent_name", "TEXT")),
+}
+
 
 class SQLiteEventStore(EventStore):
     """Thread-safe SQLite persistence for events, findings, alerts and audit."""
@@ -96,7 +104,15 @@ class SQLiteEventStore(EventStore):
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        for table, columns in _ADDED_COLUMNS.items():
+            existing = {row[1] for row in self._conn.execute(f"PRAGMA table_info({table})")}
+            for name, sql_type in columns:
+                if name not in existing:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
 
     # -- events ------------------------------------------------------------- #
     def save_events(self, events) -> None:
@@ -159,10 +175,11 @@ class SQLiteEventStore(EventStore):
         with self._lock:
             cur = self._conn.execute(
                 "INSERT INTO alerts (ts, title, message, severity, source, technique,"
-                " score, acknowledged) VALUES (?,?,?,?,?,?,?,?)",
+                " score, acknowledged, process_name, parent_name)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (alert.timestamp.isoformat(timespec="seconds"), alert.title, alert.message,
                  alert.severity.value, alert.source, alert.technique, alert.score,
-                 int(alert.acknowledged)),
+                 int(alert.acknowledged), alert.process_name, alert.parent_name),
             )
             self._conn.commit()
             return cur.lastrowid
@@ -281,7 +298,8 @@ class SQLiteEventStore(EventStore):
             id=r["id"], title=r["title"], message=r["message"] or "",
             severity=Severity(r["severity"]), source=r["source"] or "",
             technique=r["technique"] or "", score=r["score"],
-            acknowledged=bool(r["acknowledged"]), timestamp=datetime.fromisoformat(r["ts"]))
+            acknowledged=bool(r["acknowledged"]), timestamp=datetime.fromisoformat(r["ts"]),
+            process_name=r["process_name"] or "", parent_name=r["parent_name"] or "")
 
     @staticmethod
     def _row_to_audit(r: sqlite3.Row) -> AuditEvent:

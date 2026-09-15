@@ -32,6 +32,13 @@ All notable changes to Aegis are documented here. The format is based on
   rights, Start-menu and optional desktop shortcut). CI publishes it as the
   `aegis-windows-installer` artifact.
 - **Welcome guide** on first start, explaining where to begin in three steps.
+- **Trusted programs**: an alert can trust the program that caused it (for example
+  a developer tool that runs encoded PowerShell). Trusted programs, and programs
+  they start, raise no alerts; findings are still recorded, and Settings lists
+  them for removal. Interpreters and core system processes can never be trusted.
+- Process alerts name the parent program ("powershell.exe, started by
+  claude.exe") instead of a bare parent process id; alerts store the program
+  and parent names (existing databases are upgraded automatically).
 - **Home page** answers "is my computer safe?" in one sentence ("Your computer
   is protected" / "3 things need your attention") with a button for the next
   step, clickable tiles, severity and 24-hour charts, the programs using the

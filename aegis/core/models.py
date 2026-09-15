@@ -118,6 +118,8 @@ class Finding:
     entity: str = ""                     # the subject (ip:port / process) for dedup
     timestamp: datetime = field(default_factory=datetime.now)
     id: int | None = None
+    process_name: str = ""               # program involved, when known
+    parent_name: str = ""                # program that started it, when known
 
     @property
     def attack_ref(self) -> str:
@@ -139,6 +141,8 @@ class Alert:
     acknowledged: bool = False
     timestamp: datetime = field(default_factory=datetime.now)
     id: int | None = None
+    process_name: str = ""
+    parent_name: str = ""
 
 
 # --------------------------------------------------------------------------- #
