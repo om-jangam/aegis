@@ -74,6 +74,12 @@ class ProcessInfo:
         return bool(self.suspicious_reasons)
 
 
+# Windows kernel-managed processes that have no image file on disk; psutil
+# reports their name in place of a path, which is not a sign of tampering.
+_WINDOWS_PATHLESS = frozenset({"system", "registry", "memcompression", "memory compression",
+                               "secure system", "system idle process", "vmmem", "vmmemwsl"})
+
+
 def flag_reasons(exe: str, name: str) -> list[str]:
     """Heuristic suspicion flags for a process (used by rules and the UI).
 
@@ -84,7 +90,8 @@ def flag_reasons(exe: str, name: str) -> list[str]:
     low = _normalise(exe)
     if any(d in low for d in _SUSPICIOUS_DIRS):
         reasons.append("Runs from a temporary/download directory")
-    if exe and not _looks_absolute(exe):
+    pathless_kernel_process = (low == (name or "").lower() and low in _WINDOWS_PATHLESS)
+    if exe and not _looks_absolute(exe) and not pathless_kernel_process:
         reasons.append("Executable path is not absolute")
 
     lowered_name = (name or "").lower()

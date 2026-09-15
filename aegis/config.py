@@ -64,6 +64,9 @@ class Settings:
     # Alerts
     desktop_notifications: bool = True
     alert_cooldown_seconds: int = 30        # suppress duplicate alerts
+    # Repeats of one rule on one subject inside this window are stored as
+    # findings but raise no new alert, so a noisy detection cannot flood the list.
+    alert_dedup_minutes: int = 10
 
     # UI
     theme: str = "dark"                     # "dark" | "light"

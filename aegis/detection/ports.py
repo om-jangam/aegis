@@ -7,7 +7,8 @@ from __future__ import annotations
 
 # Ordinary client traffic — never suspicious on its own.
 COMMON_PORTS: frozenset[int] = frozenset(
-    {80, 443, 53, 123, 22, 993, 995, 587, 465, 3478, 8080, 8443}
+    # 5223 / 5228: Apple and Google push-notification services.
+    {80, 443, 53, 123, 22, 993, 995, 587, 465, 3478, 5223, 5228, 8080, 8443}
 )
 
 # Common default ports for C2 frameworks / backdoors.

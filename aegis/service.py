@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime, timedelta
 
 from aegis.alerting.notifier import Notifier
 from aegis.collectors.base import Collector
@@ -65,6 +66,7 @@ class SecurityService:
         self._lock = threading.Lock()
         self._finding_listeners = []
         self._alert_listeners = []
+        self._alerted: dict[tuple[str, str], datetime] = {}
 
     # -- listeners (UI subscribes) ----------------------------------------- #
     def on_finding(self, fn) -> None:
@@ -170,8 +172,23 @@ class SecurityService:
             _safe_call(fn, finding)
 
         threshold = settings.threat_score_alert_threshold
-        if finding.score >= threshold or finding.severity >= Severity.HIGH:
+        if (finding.score >= threshold or finding.severity >= Severity.HIGH) \
+                and self._first_alert_in_window(finding):
             self._raise_alert(finding)
+
+    def _first_alert_in_window(self, finding: Finding) -> bool:
+        """One alert per rule and subject per dedup window; repeats stay as findings."""
+        window = timedelta(minutes=max(0, settings.alert_dedup_minutes))
+        key = (finding.rule_id, finding.entity)
+        with self._lock:
+            last = self._alerted.get(key)
+            if last is not None and finding.timestamp - last < window:
+                return False
+            self._alerted[key] = finding.timestamp
+            if len(self._alerted) > 5000:
+                self._alerted = {k: t for k, t in self._alerted.items()
+                                 if finding.timestamp - t < window}
+        return True
 
     def _raise_alert(self, finding: Finding) -> None:
         alert = Alert(

@@ -71,6 +71,17 @@ def test_relative_path_is_flagged_on_any_platform():
     assert any("not absolute" in r for r in flag_reasons("./evil", "evil"))
 
 
+def test_windows_kernel_processes_without_an_image_file_are_not_flagged():
+    for name in ("Registry", "MemCompression", "System", "Secure System", "vmmem"):
+        assert flag_reasons(name, name) == [], name
+
+
+def test_pathless_exemption_does_not_cover_other_names_or_temp_paths():
+    assert any("not absolute" in r for r in flag_reasons("Registry", "evil.exe"))
+    assert any("temporary" in r.lower()
+               for r in flag_reasons(r"C:\Users\me\AppData\Local\Temp\Registry", "Registry"))
+
+
 # --- live, read-only --------------------------------------------------------
 def test_network_collector_emits_events():
     col = NetworkCollector()

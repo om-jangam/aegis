@@ -73,6 +73,48 @@ def test_pipeline_normal_event_no_alert(tmp_path):
     svc.store.close()
 
 
+def _c2(remote_ip="45.9.1.1"):
+    return NetworkEvent(type=EventType.NETWORK_CONNECTION, source=EventSource.PSUTIL,
+                        pid=1, process_name="evil.exe", protocol="TCP",
+                        remote_ip=remote_ip, remote_port=4444, direction=Direction.OUTBOUND)
+
+
+def test_repeated_detection_raises_one_alert_but_keeps_every_finding(tmp_path):
+    svc = _svc(tmp_path)
+    alerts = []
+    svc.on_alert(alerts.append)
+    first = svc.ingest([_c2()])
+    second = svc.ingest([_c2()])
+    c2_alerts = [a for a in alerts if a.source == "45.9.1.1:4444"]
+    assert first and second
+    assert len({a.title for a in c2_alerts}) == len(c2_alerts)   # one alert per rule
+    assert svc.store.stats()["total_findings"] == len(first) + len(second)
+    svc.store.close()
+
+
+def test_same_rule_on_a_different_subject_still_alerts(tmp_path):
+    svc = _svc(tmp_path)
+    alerts = []
+    svc.on_alert(alerts.append)
+    svc.ingest([_c2("45.9.1.1")])
+    svc.ingest([_c2("45.9.1.2")])
+    assert {a.source for a in alerts} >= {"45.9.1.1:4444", "45.9.1.2:4444"}
+    svc.store.close()
+
+
+def test_alert_dedup_can_be_disabled(tmp_path, monkeypatch):
+    from aegis.config import settings
+    monkeypatch.setattr(settings, "alert_dedup_minutes", 0)
+    svc = _svc(tmp_path)
+    alerts = []
+    svc.on_alert(alerts.append)
+    svc.ingest([_c2()])
+    once = len(alerts)
+    svc.ingest([_c2()])
+    assert len(alerts) == 2 * once
+    svc.store.close()
+
+
 def test_create_rule_is_audited(tmp_path):
     svc = _svc(tmp_path)
     result = svc.create_rule(FirewallRule(name="test rule"))

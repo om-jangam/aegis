@@ -3,6 +3,8 @@
 Each rule is verified to fire on the malicious case and stay silent on benign
 traffic (false-positive discipline), and to carry the right ATT&CK mapping.
 """
+from datetime import datetime, timedelta
+
 from aegis.core.events import Direction, EventSource, EventType, NetworkEvent, ProcessEvent
 from aegis.core.models import Severity
 from aegis.detection.base import DetectionContext
@@ -87,16 +89,67 @@ def test_trusted_ip_not_flagged():
     assert SuspiciousC2PortRule().evaluate(net(remote_ip="127.0.0.1", remote_port=4444), ctx) is None
 
 
-def test_scanning_rule_uses_context():
-    rule = NetworkScanningRule()
+SCAN_START = datetime(2026, 9, 15, 12, 0)
+
+
+def _probe(rule, targets, *, pid=777, name="scanner.exe", start=SCAN_START, step=1):
+    """Feed (ip, port) connections one ``step`` second apart; return the findings."""
     context = DetectionContext()
-    last = None
-    for i in range(20):
-        e = net(remote_ip=f"10.0.0.{i}", remote_port=445, pid=777, name="scanner.exe")
+    findings = []
+    for i, (ip, port) in enumerate(targets):
+        e = NetworkEvent(type=EventType.NETWORK_CONNECTION, source=EventSource.PSUTIL, pid=pid,
+                         process_name=name, protocol="TCP", remote_ip=ip, remote_port=port,
+                         direction=Direction.OUTBOUND,
+                         timestamp=start + timedelta(seconds=i * step))
         context.remember(e)
-        last = rule.evaluate(e, context)
-    assert last is not None
-    assert last.technique == "T1046"
+        finding = rule.evaluate(e, context)
+        if finding:
+            findings.append(finding)
+    return findings
+
+
+def _hosts(count, port=445):
+    return [(f"10.0.0.{i}", port) for i in range(count)]
+
+
+def test_scanning_rule_detects_a_host_sweep_once_not_per_connection():
+    findings = _probe(NetworkScanningRule(), _hosts(40))
+    assert len(findings) == 1
+    assert findings[0].technique == "T1046"
+    assert "10 different hosts on port 445" in findings[0].reasons[0]
+
+
+def test_scanning_rule_ignores_browsers_reaching_many_web_servers():
+    rule = NetworkScanningRule()
+    public = [(f"142.250.{i}.10", 443) for i in range(60)]
+    assert _probe(rule, public, name="brave.exe") == []
+    assert _probe(rule, [(ip, 80) for ip, _ in public], pid=778, name="chrome.exe") == []
+
+
+def test_scanning_rule_needs_the_burst_inside_its_time_window():
+    # 20 hosts, one every 10 seconds: never 10 of them inside 60 seconds.
+    assert _probe(NetworkScanningRule(), _hosts(20), step=10) == []
+
+
+def test_scanning_rule_detects_a_port_scan_of_one_host():
+    ports = [("10.0.0.9", port) for port in range(1000, 1030)]
+    findings = _probe(NetworkScanningRule(), ports)
+    assert len(findings) == 1
+    assert "15 different ports on 10.0.0.9" in findings[0].reasons[0]
+
+
+def test_scanning_rule_reports_again_only_after_its_cooldown():
+    rule = NetworkScanningRule()
+    assert len(_probe(rule, _hosts(12))) == 1
+    assert _probe(rule, _hosts(12), start=SCAN_START + timedelta(minutes=5)) == []
+    assert len(_probe(rule, _hosts(12), start=SCAN_START + timedelta(minutes=11))) == 1
+
+
+def test_push_notification_ports_are_not_uncommon():
+    rule = UncommonPortToPublicRule()
+    assert rule.evaluate(net(remote_ip="142.250.4.188", remote_port=5228), ctx) is None
+    assert rule.evaluate(net(remote_ip="17.57.144.10", remote_port=5223), ctx) is None
+    assert rule.evaluate(net(remote_ip="142.250.4.188", remote_port=47123), ctx) is not None
 
 
 def test_process_location_rule():

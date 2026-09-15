@@ -6,6 +6,9 @@ movement (e.g. RDP/SMB lateral movement).
 """
 from __future__ import annotations
 
+import threading
+from datetime import datetime, timedelta
+
 from aegis.config import settings
 from aegis.core.events import Event, EventType, NetworkEvent
 from aegis.core.models import Severity
@@ -159,27 +162,62 @@ class NetworkScanningRule(DetectionRule):
     severity = Severity.HIGH
     technique = "T1046"
     tactic = "Discovery"
-    description = ("A single process contacted many distinct hosts in a short "
-                   "window — consistent with host/port scanning.")
+    description = ("One process probed many hosts on the same service port, or many ports "
+                   "on one host, within a minute: the shape of host discovery or port "
+                   "scanning. Web traffic (ports 80/443) is ignored, because browsers and "
+                   "apps legitimately reach dozens of servers.")
     event_types = (EventType.NETWORK_CONNECTION,)
-    DISTINCT_HOST_THRESHOLD = 15
+    WINDOW = timedelta(seconds=60)
+    HOST_SWEEP_THRESHOLD = 10     # distinct hosts on one port
+    PORT_SCAN_THRESHOLD = 15      # distinct ports on one host
+    COOLDOWN = timedelta(minutes=10)
+    WEB_PORTS = frozenset({80, 443})
+
+    def __init__(self) -> None:
+        self._last_fired: dict[tuple[int, str, str], datetime] = {}
+        self._lock = threading.Lock()
 
     def evaluate(self, event: Event, context: DetectionContext):
-        if not isinstance(event, NetworkEvent):
+        if not isinstance(event, NetworkEvent) or not event.pid or not event.remote_ip:
             return None
-        if not event.pid:
+        if event.remote_port in self.WEB_PORTS or _trusted(event):
             return None
-        peers = {
-            e.remote_ip for e in context.recent(EventType.NETWORK_CONNECTION)
-            if isinstance(e, NetworkEvent) and e.pid == event.pid and e.remote_ip
-        }
-        if len(peers) >= self.DISTINCT_HOST_THRESHOLD:
-            return self.make_finding(
-                score=80,
-                reasons=[f"{event.process_name} contacted {len(peers)} distinct hosts recently"],
-                entity=f"pid:{event.pid}:{event.process_name}",
-                source_summary=event.summary())
-        return None
+
+        since = event.timestamp - self.WINDOW
+        recent = [e for e in context.recent(EventType.NETWORK_CONNECTION)
+                  if isinstance(e, NetworkEvent) and e.pid == event.pid
+                  and e.remote_ip and e.timestamp >= since]
+        hosts = {e.remote_ip for e in recent if e.remote_port == event.remote_port}
+        ports = {e.remote_port for e in recent
+                 if e.remote_ip == event.remote_ip and e.remote_port not in self.WEB_PORTS}
+        seconds = int(self.WINDOW.total_seconds())
+        if len(hosts) >= self.HOST_SWEEP_THRESHOLD:
+            kind = "sweep"
+            reason = (f"{event.process_name} contacted {len(hosts)} different hosts on port "
+                      f"{event.remote_port} within {seconds}s")
+        elif len(ports) >= self.PORT_SCAN_THRESHOLD:
+            kind = "portscan"
+            reason = (f"{event.process_name} tried {len(ports)} different ports on "
+                      f"{event.remote_ip} within {seconds}s")
+        else:
+            return None
+
+        # A scan produces a burst of matching connections; report it once, not per packet.
+        key = (event.pid, event.process_name, kind)
+        with self._lock:
+            last = self._last_fired.get(key)
+            if last is not None and event.timestamp - last < self.COOLDOWN:
+                return None
+            self._last_fired[key] = event.timestamp
+            if len(self._last_fired) > 1000:
+                self._last_fired = {k: t for k, t in self._last_fired.items()
+                                    if event.timestamp - t < self.COOLDOWN}
+
+        return self.make_finding(
+            score=80,
+            reasons=[reason, "Consistent with host discovery or port scanning"],
+            entity=f"pid:{event.pid}:{event.process_name}",
+            source_summary=event.summary())
 
 
 class ListeningOnSensitivePortRule(DetectionRule):

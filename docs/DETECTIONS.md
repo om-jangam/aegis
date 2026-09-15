@@ -13,7 +13,7 @@ secondary (see [`ML_EVALUATION.md`](ML_EVALUATION.md)).
 | `NET-REMOTE-SVC` | Remote administration service connection | **T1021** | Lateral Movement | MED–HIGH | RDP (3389), SMB (445), WinRM (5985/6) |
 | `NET-LEGACY-PROTO` | Legacy / plaintext protocol to a public host | **T1071** | Command & Control | MEDIUM | Telnet, FTP, SMTP, POP3, IMAP to public IP |
 | `NET-INTERPRETER` | Script interpreter making a network connection | **T1059** | Execution | HIGH | powershell/cmd/wscript/mshta/rundll32 → net |
-| `NET-SCAN` | Possible network scanning / sweep | **T1046** | Discovery | HIGH | One PID → many distinct hosts (context window) |
+| `NET-SCAN` | Possible network scanning / sweep | **T1046** | Discovery | HIGH | Within 60 s, one PID → ≥10 hosts on the same non-web port, or ≥15 ports on one host; ports 80/443 ignored; reported once per 10 min |
 | `NET-LISTEN-SENSITIVE` | Listening on a sensitive port | **T1571** | Command & Control | MEDIUM | Bind/listen on a backdoor-associated port |
 | `NET-UNCOMMON-PORT` | Uncommon port to a public host | **T1571** | Command & Control | LOW | Non-standard high port to public IP (weak signal) |
 | `PROC-SUSPICIOUS-PATH` | Process from a suspicious location | **T1036** | Defense Evasion | MEDIUM | Temp/Downloads exec, non-absolute path, name spoof |

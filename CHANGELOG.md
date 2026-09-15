@@ -30,6 +30,20 @@ All notable changes to Aegis are documented here. The format is based on
 ### Changed
 - Console live-refresh now selects views by type instead of sidebar position,
   so adding pages no longer breaks which views refresh.
+- **Alert floods:** the same rule on the same subject now raises at most one
+  alert per `alert_dedup_minutes` (default 10). Repeats are still recorded as
+  findings, so no evidence is lost.
+
+### Fixed
+- `NET-SCAN` fired on ordinary web browsing (153 false alerts from Brave and
+  Chrome in real use) and re-fired on every later connection. It now requires,
+  within 60 seconds, 10+ hosts on the same non-web port or 15+ ports on one
+  host, ignores ports 80/443, and reports each scan once per 10 minutes.
+- Windows kernel processes without an image file (`Registry`,
+  `MemCompression`, `System`...) are no longer flagged as having a
+  non-absolute executable path.
+- Push-notification ports 5223 (Apple) and 5228 (Google) no longer count as
+  uncommon ports.
 
 ## [1.1.0] - 2026-09-14
 
