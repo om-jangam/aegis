@@ -14,7 +14,17 @@
 
 ---
 
-## Start in 60 seconds
+## Install on Windows (no Python needed)
+
+1. Download **`Aegis-Setup-<version>.exe`** (from a release, or the
+   `aegis-windows-installer` artifact of the latest CI run).
+2. Double-click it and follow the steps. No administrator rights are needed.
+3. Open **Aegis** from the Start menu. A short welcome guide shows where to begin.
+
+To build the installer yourself: `packaging\build_windows.ps1` (needs Python,
+plus [Inno Setup 6](https://jrsoftware.org/isinfo.php) for the installer step).
+
+## Start in 60 seconds (command line, any OS)
 
 ```bash
 pip install -e .              # headless install (add [ui] for the desktop console)

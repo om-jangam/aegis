@@ -227,11 +227,21 @@ class SQLiteEventStore(EventStore):
             top_tech = c.execute(
                 "SELECT technique, COUNT(*) n FROM findings WHERE technique != ''"
                 " GROUP BY technique ORDER BY n DESC LIMIT 8").fetchall()
+            top_processes = c.execute(
+                "SELECT process_name, COUNT(*) n FROM events WHERE type = ?"
+                " AND process_name IS NOT NULL AND process_name NOT IN ('', 'System')"
+                " GROUP BY process_name ORDER BY n DESC LIMIT 8",
+                (EventType.NETWORK_CONNECTION.value,)).fetchall()
+            open_serious = c.execute(
+                "SELECT COUNT(*) FROM alerts WHERE acknowledged=0"
+                " AND severity IN ('HIGH', 'CRITICAL')").fetchone()[0]
         return {
             "total_events": total_events,
             "total_findings": total_findings,
             "total_alerts": total_alerts,
             "open_alerts": open_alerts,
+            "open_serious_alerts": open_serious,
+            "top_processes": [dict(r) for r in top_processes],
             "alerts_by_severity": by_sev,
             "top_remote_ips": [dict(r) for r in top_remote],
             "top_techniques": [dict(r) for r in top_tech],

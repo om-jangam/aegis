@@ -36,7 +36,7 @@ class SecurityCheckView(BaseView):
         self.grade = ft.Text("Not run yet", size=13, color=theme.TEXT_MUTED)
         self.counts = ft.Text("", size=12, color=theme.TEXT_MUTED)
         self.check_progress = ft.ProgressRing(width=18, height=18, stroke_width=2, visible=False)
-        self.run_btn = ft.FilledButton("Run check", icon=ft.Icons.REFRESH, on_click=self._run_check)
+        self.run_btn = ft.FilledButton("Run check", icon=ft.Icons.REFRESH, on_click=self.run_check)
         score_panel = c.panel(ft.Row([
             ft.Column([ft.Text("Security score", size=12, color=theme.TEXT_MUTED),
                        self.score, self.grade], spacing=2, tight=True),
@@ -70,12 +70,12 @@ class SecurityCheckView(BaseView):
     def refresh(self) -> None:
         self._show_intel()
         if self._report is None and not self._checking:
-            self._run_check()
+            self.run_check()
         else:
             self.safe_update()
 
     # -- security check ----------------------------------------------------- #
-    def _run_check(self, e=None) -> None:
+    def run_check(self, e=None) -> None:
         if self._checking:
             return
         self._set_checking(True)
@@ -91,6 +91,7 @@ class SecurityCheckView(BaseView):
         else:
             self._report = report
             self._render(report)
+            self.app.posture_updated(report)
         finally:
             self._set_checking(False)
 

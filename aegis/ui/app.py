@@ -6,7 +6,7 @@ import time
 
 import flet as ft
 
-from aegis import __app_name__, __description__, __version__
+from aegis import __app_name__, __version__
 from aegis.config import ASSETS_DIR, settings
 from aegis.service import SecurityService
 from aegis.ui import theme
@@ -19,15 +19,27 @@ from aegis.ui.views.rules_view import RulesView
 from aegis.ui.views.security_check_view import SecurityCheckView
 from aegis.ui.views.settings_view import SettingsView
 
+_WELCOME_STEPS = (
+    (ft.Icons.HEALTH_AND_SAFETY_OUTLINED, "Check your settings",
+     "Security Check finds weak settings and tells you how to fix each one."),
+    (ft.Icons.RADAR, "Leave monitoring on",
+     "Aegis quietly watches network connections and programs for signs of attack."),
+    (ft.Icons.NOTIFICATIONS_ACTIVE_OUTLINED, "Read your alerts",
+     "If something looks wrong, Alerts explains what happened and what to do."),
+)
+
 
 class AegisApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.service = SecurityService()
+        #: Latest security-check report, shared by the Home and Security Check pages.
+        self.posture_report = None
+        self._posture_requested = False
         self._configure_page()
 
-        self.views = [DashboardView(self), SecurityCheckView(self), ConnectionsView(self),
-                      ProcessesView(self), DetectionsView(self), RulesView(self),
+        self.views = [DashboardView(self), SecurityCheckView(self), DetectionsView(self),
+                      ConnectionsView(self), ProcessesView(self), RulesView(self),
                       AuditView(self), SettingsView(self)]
         self.active_index = 0
         self.content_host = ft.Container(expand=True, padding=24, content=self.views[0].control)
@@ -44,10 +56,12 @@ class AegisApp:
         self.sync_monitor_button()
         self._start_refresh_loop()
         self.navigate(0)
+        if not settings.onboarding_done:
+            self.show_welcome()
 
     def _configure_page(self) -> None:
         p = self.page
-        p.title = f"{__app_name__} — {__description__}"
+        p.title = f"{__app_name__} - Security for this computer"
         p.theme_mode = ft.ThemeMode.DARK
         p.theme = ft.Theme(color_scheme_seed=theme.PRIMARY, font_family="Segoe UI")
         try:
@@ -73,14 +87,16 @@ class AegisApp:
         brand = ft.Row([ft.Icon(ft.Icons.SHIELD_MOON, color=theme.PRIMARY, size=30),
                         ft.Column([ft.Text(__app_name__, size=20, weight=ft.FontWeight.BOLD,
                                            color=theme.TEXT),
-                                   ft.Text("Host Firewall & IDS", size=10, color=theme.TEXT_MUTED)],
+                                   ft.Text("Keeps this computer safe", size=10,
+                                           color=theme.TEXT_MUTED)],
                                   spacing=0, tight=True)], spacing=10)
         return ft.Container(
             content=ft.Column([
                 ft.Container(brand, padding=ft.Padding.only(left=18, top=22, bottom=22, right=18)),
                 ft.Container(nav, padding=ft.Padding.symmetric(horizontal=12), expand=True),
                 ft.Divider(color=theme.BORDER, height=1),
-                ft.Container(ft.Text(f"v{__version__}", size=10, color=theme.TEXT_MUTED), padding=14),
+                ft.Container(ft.Text(f"Version {__version__}", size=10, color=theme.TEXT_MUTED),
+                             padding=14),
             ], spacing=0, expand=True),
             width=232, bgcolor=theme.SURFACE,
             border=ft.Border.only(right=ft.BorderSide(1, theme.BORDER)))
@@ -89,7 +105,7 @@ class AegisApp:
         self.title_text = ft.Text(self.views[0].title, size=22, weight=ft.FontWeight.BOLD,
                                   color=theme.TEXT)
         self.status_dot = ft.Icon(ft.Icons.CIRCLE, size=12, color=theme.OK)
-        self.status_text = ft.Text("Protected", size=12, color=theme.TEXT_MUTED)
+        self.status_text = ft.Text("Watching", size=12, color=theme.TEXT_MUTED)
         topbar = ft.Container(
             content=ft.Row([self.title_text, ft.Container(expand=True),
                             ft.Row([self.status_dot, self.status_text], spacing=6),
@@ -115,6 +131,71 @@ class AegisApp:
             pass
         self.page.update()
 
+    def navigate_to(self, view_type: type) -> None:
+        for i, view in enumerate(self.views):
+            if isinstance(view, view_type):
+                self.navigate(i)
+                return
+
+    # -- security check shared between pages -------------------------------- #
+    def request_posture(self) -> None:
+        """Start the first security check in the background, once."""
+        if self._posture_requested:
+            return
+        self._posture_requested = True
+        self.view_of(SecurityCheckView).run_check()
+
+    def posture_updated(self, report) -> None:
+        self.posture_report = report
+        if isinstance(self.views[self.active_index], DashboardView):
+            self.views[self.active_index].refresh()
+
+    def view_of(self, view_type: type):
+        return next(v for v in self.views if isinstance(v, view_type))
+
+    # -- welcome ------------------------------------------------------------ #
+    def show_welcome(self) -> None:
+        def finish(open_check: bool) -> None:
+            settings.onboarding_done = True
+            settings.save()
+            # Switch pages first: closing the dialog and then redrawing the page in
+            # the same handler froze the dialog's fade-out on screen.
+            if open_check:
+                self.navigate_to(SecurityCheckView)
+            self.page.pop_dialog()
+            self.page.update()
+
+        steps = [
+            ft.Row([
+                ft.Container(ft.Icon(icon, color=theme.PRIMARY, size=22),
+                             bgcolor=ft.Colors.with_opacity(0.15, theme.PRIMARY),
+                             padding=10, border_radius=10),
+                ft.Column([ft.Text(f"{n}. {title}", size=14, color=theme.TEXT,
+                                   weight=ft.FontWeight.W_600),
+                           ft.Text(text, size=12, color=theme.TEXT_MUTED)],
+                          spacing=2, tight=True, expand=True),
+            ], spacing=14, vertical_alignment=ft.CrossAxisAlignment.START)
+            for n, (icon, title, text) in enumerate(_WELCOME_STEPS, start=1)
+        ]
+        self.page.show_dialog(ft.AlertDialog(
+            modal=True,
+            title=ft.Row([ft.Icon(ft.Icons.SHIELD_MOON, color=theme.PRIMARY, size=28),
+                          ft.Text("Welcome to Aegis", size=22, weight=ft.FontWeight.BOLD)],
+                         spacing=10),
+            content=ft.Column([
+                ft.Text("Aegis watches this computer for attacks and helps you fix weak "
+                        "security settings. Three things to know:", size=14),
+                *steps,
+                ft.Text("Everything stays on this computer. Nothing is sent anywhere.",
+                        size=12, color=theme.TEXT_MUTED),
+            ], spacing=16, tight=True, width=480),
+            actions=[
+                ft.TextButton("Skip for now", on_click=lambda e: finish(False)),
+                ft.FilledButton("Run my first security check",
+                                icon=ft.Icons.HEALTH_AND_SAFETY_OUTLINED,
+                                on_click=lambda e: finish(True)),
+            ]))
+
     # -- monitor toggle ----------------------------------------------------- #
     def toggle_monitor(self, e=None) -> None:
         if self.service.running:
@@ -122,6 +203,9 @@ class AegisApp:
         else:
             self.service.start()
         self.sync_monitor_button()
+        view = self.views[self.active_index]
+        if isinstance(view, DashboardView):
+            view.refresh()
         self.page.update()
 
     def sync_monitor_button(self) -> None:
@@ -130,7 +214,7 @@ class AegisApp:
         self.monitor_btn.icon = ft.Icons.PAUSE if running else ft.Icons.PLAY_ARROW
         self.monitor_btn.on_click = self.toggle_monitor
         self.status_dot.color = theme.OK if running else theme.WARN
-        self.status_text.value = "Protected" if running else "Paused"
+        self.status_text.value = "Watching" if running else "Paused"
 
     # -- live refresh ------------------------------------------------------- #
     def _safe(self, fn) -> None:

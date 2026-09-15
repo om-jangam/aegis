@@ -27,7 +27,25 @@ All notable changes to Aegis are documented here. The format is based on
   run encoded or hidden PowerShell, pull code through system tools, pipe
   `curl` into a shell, or open a reverse shell.
 
+- **Windows installer**: `packaging\build_windows.ps1` freezes the desktop app
+  with PyInstaller and builds a per-user Inno Setup installer (no administrator
+  rights, Start-menu and optional desktop shortcut). CI publishes it as the
+  `aegis-windows-installer` artifact.
+- **Welcome guide** on first start, explaining where to begin in three steps.
+- **Home page** answers "is my computer safe?" in one sentence ("Your computer
+  is protected" / "3 things need your attention") with a button for the next
+  step, clickable tiles, severity and 24-hour charts, the programs using the
+  internet most, and the latest alerts.
+
 ### Changed
+- **Plain language throughout the desktop app.** Pages are renamed (Home,
+  Alerts, Network Activity, Running Programs, Firewall, Activity History), every
+  alert shows "What should I do?", times read "5 minutes ago", connection states
+  and settings are described in everyday words, and technical references
+  (ATT&CK ids, process ids) move to small print or tooltips.
+- Firewall page shows a clear "view only, run as administrator" notice and
+  disables changes without administrator rights; blocking an address from
+  Network Activity asks for confirmation; "Mark all as reviewed" confirms first.
 - Console live-refresh now selects views by type instead of sidebar position,
   so adding pages no longer breaks which views refresh.
 - **Alert floods:** the same rule on the same subject now raises at most one
