@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest a check, detection or improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      placeholder: "I can't tell whether my Wi-Fi network is safe."
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like Aegis to do?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Security check
+        - Detection / alerts
+        - Threat intelligence
+        - Firewall / response
+        - Desktop app or dashboard
+        - Installer / packaging
+        - Documentation
+        - Other
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Links, MITRE ATT&CK techniques, screenshots, or examples from other tools.

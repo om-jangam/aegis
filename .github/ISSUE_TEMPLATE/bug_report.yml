@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in Aegis does not work as described
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please **do not** report security vulnerabilities here;
+        follow the private process in [SECURITY.md](https://github.com/cipher-10/aegis/blob/main/SECURITY.md) instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: "I ran `aegis check` and the firewall check said FAIL, but my firewall is on."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Aegis
+        2. Go to Security Check
+        3. Click Run check
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Aegis version
+      description: Shown at the bottom of the sidebar, or run `aegis --version`.
+      placeholder: "1.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install Aegis?
+      options:
+        - Windows installer
+        - pip / from source
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error messages or logs
+      description: >
+        Paste relevant lines from the log file in the Aegis data folder
+        (`%LOCALAPPDATA%\Aegis\logs` on Windows). Remove anything private first.
+      render: text

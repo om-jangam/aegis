@@ -1,0 +1,20 @@
+# Weekly pull requests for outdated Python dependencies and GitHub Actions.
+# Security fixes arrive as soon as they are published, independent of this schedule.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
