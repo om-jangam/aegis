@@ -16,6 +16,7 @@ class SettingsView(BaseView):
     def build(self) -> ft.Control:
         self.monitoring = ft.Switch(value=settings.monitoring_enabled, active_color=theme.PRIMARY)
         self.anomaly = ft.Switch(value=settings.anomaly_detection_enabled, active_color=theme.PRIMARY)
+        self.threat_intel = ft.Switch(value=settings.threat_intel_enabled, active_color=theme.PRIMARY)
         self.notifications = ft.Switch(value=settings.desktop_notifications, active_color=theme.PRIMARY)
         self.auto_respond = ft.Switch(value=False, active_color=theme.DANGER)
         self.threshold = ft.Slider(min=20, max=100, divisions=8,
@@ -41,6 +42,8 @@ class SettingsView(BaseView):
                 c.section_title("Monitoring & Detection", ft.Icons.RADAR),
                 row("Live monitoring", "Continuously scan connections & processes", self.monitoring),
                 row("AI anomaly assist", "IsolationForest flags outlier connections", self.anomaly),
+                row("Threat intelligence", "Alert on connections to known-malicious IPs "
+                    "(update lists on the Security Check page)", self.threat_intel),
                 row("Network poll interval (s)", "How often to scan the socket table", self.net_interval),
                 ft.Container(ft.Column([
                     ft.Text("Alert threat-score threshold", size=14, color=theme.TEXT,
@@ -63,6 +66,7 @@ class SettingsView(BaseView):
     def _save(self, e=None) -> None:
         settings.monitoring_enabled = self.monitoring.value
         settings.anomaly_detection_enabled = self.anomaly.value
+        settings.threat_intel_enabled = self.threat_intel.value
         settings.desktop_notifications = self.notifications.value
         settings.threat_score_alert_threshold = int(self.threshold.value)
         try:

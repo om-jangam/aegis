@@ -16,6 +16,7 @@ from aegis.ui.views.dashboard import DashboardView
 from aegis.ui.views.detections_view import DetectionsView
 from aegis.ui.views.processes_view import ProcessesView
 from aegis.ui.views.rules_view import RulesView
+from aegis.ui.views.security_check_view import SecurityCheckView
 from aegis.ui.views.settings_view import SettingsView
 
 
@@ -25,8 +26,9 @@ class AegisApp:
         self.service = SecurityService()
         self._configure_page()
 
-        self.views = [DashboardView(self), ConnectionsView(self), ProcessesView(self),
-                      DetectionsView(self), RulesView(self), AuditView(self), SettingsView(self)]
+        self.views = [DashboardView(self), SecurityCheckView(self), ConnectionsView(self),
+                      ProcessesView(self), DetectionsView(self), RulesView(self),
+                      AuditView(self), SettingsView(self)]
         self.active_index = 0
         self.content_host = ft.Container(expand=True, padding=24, content=self.views[0].control)
         self._nav_buttons: list[ft.Container] = []
@@ -138,7 +140,7 @@ class AegisApp:
             pass
 
     def _on_alert(self) -> None:
-        if self.active_index in (0, 3):
+        if isinstance(self.views[self.active_index], DashboardView | DetectionsView):
             try:
                 self.views[self.active_index].refresh()
             except Exception:  # noqa: BLE001
@@ -155,7 +157,7 @@ class AegisApp:
         threading.Thread(target=loop, name="ui-refresh", daemon=True).start()
 
     def _tick(self) -> None:
-        if self.active_index in (0, 1, 2):
+        if isinstance(self.views[self.active_index], DashboardView | ConnectionsView | ProcessesView):
             try:
                 self.views[self.active_index].refresh()
             except Exception:  # noqa: BLE001

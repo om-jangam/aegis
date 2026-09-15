@@ -14,6 +14,16 @@ All notable changes to Aegis are documented here. The format is based on
 - Locale-independent firewall management via the Windows COM API (`INetFwPolicy2`).
 - DNS telemetry, so threat intel can match malicious domains as well as IPs.
 
+### Added
+- Desktop console **Security Check** page: posture score, every check with its
+  fix, threat-intel status and a one-click "Update blocklists" button. Checks
+  and downloads run in the background so the window stays responsive.
+- Settings switch to turn threat-intelligence matching on or off.
+
+### Changed
+- Console live-refresh now selects views by type instead of sidebar position,
+  so adding pages no longer breaks which views refresh.
+
 ## [1.1.0] - 2026-09-14
 
 Aegis becomes useful to people who are not security analysts: it now tells you
