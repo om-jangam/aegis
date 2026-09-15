@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thanks for reporting. Please **do not** report security vulnerabilities here;
-        follow the private process in [SECURITY.md](https://github.com/cipher-10/aegis/blob/main/SECURITY.md) instead.
+        follow the private process in [SECURITY.md](https://github.com/om-jangam/aegis/blob/main/SECURITY.md) instead.
   - type: textarea
     id: what-happened
     attributes:

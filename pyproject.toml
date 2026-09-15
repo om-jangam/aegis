@@ -37,9 +37,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/cipher-10/aegis"
-Repository = "https://github.com/cipher-10/aegis"
-Issues = "https://github.com/cipher-10/aegis/issues"
+Homepage = "https://github.com/om-jangam/aegis"
+Repository = "https://github.com/om-jangam/aegis"
+Issues = "https://github.com/om-jangam/aegis/issues"
 
 [project.optional-dependencies]
 ui = ["flet==0.86.*"]
