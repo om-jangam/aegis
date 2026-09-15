@@ -35,6 +35,10 @@ Thumbs.db
 # Large prebuilt artifact from the original project
 MAIN.exe
 
+# Local copy of the original project and early scaffold, kept for reference
+# only (contains the original command-injection bug and a third-party font)
+reference_scaffold/
+
 # Additional tooling / build artifacts
 .mypy_cache/
 *.spec
