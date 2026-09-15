@@ -6,7 +6,8 @@
 > ATT&CK-mapped intrusion detection, one-command containment, and a local web
 > dashboard, for Windows, Linux and macOS.
 
-![tests](https://img.shields.io/badge/tests-450%2B_passing-brightgreen)
+[![CI](https://github.com/om-jangam/aegis/actions/workflows/ci.yml/badge.svg)](https://github.com/om-jangam/aegis/actions/workflows/ci.yml)
+![tests](https://img.shields.io/badge/tests-540%2B-brightgreen)
 ![lint](https://img.shields.io/badge/ruff-clean-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue)

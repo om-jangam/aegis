@@ -487,7 +487,7 @@ def test_malware_style_startup_commands_are_flagged(command):
 @pytest.mark.parametrize("command", [
     r"%windir%\system32\SecurityHealthSystray.exe",
     r'"C:\Program Files\Softdeluxe\Free Download Manager\fdm.exe" --hidden',
-    r'"C:\Users\omipc\AppData\Local\Programs\Notion\Notion.exe" --open-at-login',
+    r'"C:\Users\me\AppData\Local\Programs\Notion\Notion.exe" --open-at-login',
     r'"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --no-startup-window',
     "17 * * * * root cd / && run-parts --report /etc/cron.hourly",
     "0 3 * * * root /usr/bin/certbot renew --quiet",

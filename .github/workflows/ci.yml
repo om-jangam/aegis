@@ -1,9 +1,7 @@
 name: CI
 
-# Private repositories get a monthly budget of Actions minutes, and Windows and
-# macOS runners consume it 2x and 10x faster than Linux. Everyday pushes and
-# pull requests therefore run the Linux suite only; the full cross-platform
-# matrix and the Windows installer run for release tags or on demand
+# Every push and pull request is tested on Linux, Windows and macOS. The Windows
+# installer is slow to build, so it runs only for release tags (v*) or on demand
 # (Actions tab > CI > Run workflow).
 on:
   push:
@@ -57,8 +55,7 @@ jobs:
   test-desktop:
     name: ${{ matrix.os }} · Python ${{ matrix.python-version }}
     # Aegis claims to run on all three desktop platforms; this job keeps that
-    # claim verifiable for every release without spending minutes on each push.
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.full)
+    # claim verifiable on every push.
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
