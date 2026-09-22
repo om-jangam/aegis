@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from aegis.core.models import Severity
 
-BG = "#0b1220"
-SURFACE = "#131c2e"
-SURFACE_ALT = "#1b2740"
+BG = "#020409"
+# Panels are tinted glass, so the space backdrop shows through them.
+SURFACE = "#131c2e,0.88"
+SURFACE_ALT = "#1b2740,0.9"
 BORDER = "#243350"
 PRIMARY = "#22d3ee"
 ACCENT = "#38bdf8"

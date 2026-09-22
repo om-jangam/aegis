@@ -33,7 +33,7 @@ import logging
 import re
 import subprocess
 
-from aegis import LEGACY_RULE_TAG, RULE_TAG
+from aegis import RULE_TAG
 from aegis.core import validators
 from aegis.core.models import (
     Finding,
@@ -102,7 +102,7 @@ class FirewallManager(FirewallBackend):
         value can never be turned into a command argument.
         """
         name = validators.validate_name(rule.name)
-        if not (name.startswith(RULE_TAG) or name.startswith(LEGACY_RULE_TAG)):
+        if not (name.startswith(RULE_TAG)):
             name = f"{RULE_TAG} {name}"
 
         local_ip = validators.validate_ip(rule.local_ip, "Local IP")
@@ -167,7 +167,7 @@ class FirewallManager(FirewallBackend):
     @staticmethod
     def _is_aegis_rule(record: dict) -> bool:
         name = record.get("Rule Name", "")
-        return name.startswith(RULE_TAG) or name.startswith(LEGACY_RULE_TAG)
+        return name.startswith(RULE_TAG)
 
     @staticmethod
     def _rule_from_record(record: dict) -> FirewallRule:

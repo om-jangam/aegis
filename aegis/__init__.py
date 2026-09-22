@@ -11,6 +11,4 @@ __description__ = "Host Firewall & Intrusion Detection System"
 
 # Internal tag applied to every firewall rule created by Aegis so the app can
 # distinguish its own rules from the hundreds of default Windows rules.
-# (Kept from the original "ICE BOX" project for lineage / backward compat.)
 RULE_TAG = "[AEGIS]"
-LEGACY_RULE_TAG = "[ICEBOX]"

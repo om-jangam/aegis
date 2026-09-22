@@ -7,9 +7,10 @@ import time
 import flet as ft
 
 from aegis import __app_name__, __version__
-from aegis.config import ASSETS_DIR, settings
+from aegis.config import ASSETS_DIR, DATA_DIR, settings
 from aegis.service import SecurityService
 from aegis.ui import theme
+from aegis.ui.space import SpaceBackground
 from aegis.ui.views.audit_view import AuditView
 from aegis.ui.views.connections_view import ConnectionsView
 from aegis.ui.views.dashboard import DashboardView
@@ -46,9 +47,12 @@ class AegisApp:
         self._nav_buttons: list[ft.Container] = []
         self.monitor_btn = ft.FilledButton("Start monitoring", icon=ft.Icons.PLAY_ARROW)
 
-        page.add(ft.Container(
-            content=ft.Row([self._sidebar(), self._main_area()], spacing=0, expand=True),
-            expand=True, bgcolor=theme.BG))
+        self.sky = SpaceBackground(visible=settings.space_background,
+                                   cache_dir=DATA_DIR / "sky")
+        page.add(ft.Stack([
+            self.sky.control,
+            ft.Row([self._sidebar(), self._main_area()], spacing=0, expand=True),
+        ], fit=ft.StackFit.EXPAND, expand=True))
 
         self.service.on_alert(lambda a: self._safe(self._on_alert))
         if settings.monitoring_enabled:
@@ -64,6 +68,8 @@ class AegisApp:
         p.title = f"{__app_name__} - Security for this computer"
         p.theme_mode = ft.ThemeMode.DARK
         p.theme = ft.Theme(color_scheme_seed=theme.PRIMARY, font_family="Segoe UI")
+        p.bgcolor = theme.BG
+        p.padding = 0
         try:
             p.window.width = 1280
             p.window.height = 840

@@ -78,11 +78,8 @@ class RulesView(BaseView):
         self.safe_update()
 
     def _display_name(self, name: str) -> str:
-        from aegis import LEGACY_RULE_TAG, RULE_TAG
-        for tag in (RULE_TAG, LEGACY_RULE_TAG):
-            if name.startswith(tag):
-                return name[len(tag):].strip()
-        return name
+        from aegis import RULE_TAG
+        return name[len(RULE_TAG):].strip() if name.startswith(RULE_TAG) else name
 
     def _card(self, rule: FirewallRule) -> ft.Control:
         blocks = rule.action != FirewallAction.ALLOW

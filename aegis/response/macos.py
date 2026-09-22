@@ -29,7 +29,7 @@ import subprocess
 from dataclasses import asdict
 from pathlib import Path
 
-from aegis import LEGACY_RULE_TAG, RULE_TAG
+from aegis import RULE_TAG
 from aegis.core import validators
 from aegis.core.models import (
     FirewallAction,
@@ -163,7 +163,7 @@ class PfManager(FirewallBackend):
         value is rejected before it can reach the ruleset.
         """
         name = validators.validate_name(rule.name)
-        if not (name.startswith(RULE_TAG) or name.startswith(LEGACY_RULE_TAG)):
+        if not (name.startswith(RULE_TAG)):
             name = f"{RULE_TAG} {name}"
 
         local_ip = validators.validate_ip(rule.local_ip, "Local IP")
@@ -243,7 +243,7 @@ class PfManager(FirewallBackend):
             # Rejected before any command is run — the injection guarantee.
             log.warning("Rejected invalid firewall rule: %s", exc)
             return FirewallResult(False, f"Invalid rule: {exc}")
-        if not (name.startswith(RULE_TAG) or name.startswith(LEGACY_RULE_TAG)):
+        if not (name.startswith(RULE_TAG)):
             name = f"{RULE_TAG} {name}"
 
         state = self._load_state()

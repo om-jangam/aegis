@@ -20,6 +20,7 @@ class SettingsView(BaseView):
         self.anomaly = ft.Switch(value=settings.anomaly_detection_enabled, active_color=theme.PRIMARY)
         self.notifications = ft.Switch(value=settings.desktop_notifications, active_color=theme.PRIMARY)
         self.auto_respond = ft.Switch(value=self.service.auto_respond, active_color=theme.DANGER)
+        self.space = ft.Switch(value=settings.space_background, active_color=theme.PRIMARY)
         self.threshold = ft.Slider(min=20, max=100, divisions=8,
                                    value=settings.threat_score_alert_threshold, label="{value}",
                                    active_color=theme.PRIMARY)
@@ -79,6 +80,12 @@ class SettingsView(BaseView):
                 self.trusted_list,
             ], spacing=10)),
             c.panel(ft.Column([
+                c.section_title("Appearance", ft.Icons.AUTO_AWESOME),
+                row("Starry background",
+                    "A quiet, still starfield behind the pages. Turn off for a plain dark "
+                    "background.", self.space),
+            ], spacing=10)),
+            c.panel(ft.Column([
                 c.section_title("Advanced", ft.Icons.TUNE),
                 row("Network check interval (seconds)",
                     "How often Aegis looks at network connections. Lower uses more CPU.",
@@ -130,7 +137,9 @@ class SettingsView(BaseView):
         settings.desktop_notifications = self.notifications.value
         settings.threat_score_alert_threshold = int(self.threshold.value)
         settings.network_poll_interval = interval
+        settings.space_background = self.space.value
         settings.save()
+        self.app.sky.set_visible(settings.space_background)
         self.service.auto_respond = self.auto_respond.value
         if settings.monitoring_enabled and not self.service.running:
             self.service.start()

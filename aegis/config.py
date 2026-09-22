@@ -93,6 +93,7 @@ class Settings:
     # UI
     theme: str = "dark"                     # "dark" | "light"
     onboarding_done: bool = False           # welcome screen already shown
+    space_background: bool = True           # still starfield behind the pages
 
     # Data retention
     event_retention_days: int = 30

@@ -16,7 +16,7 @@ from aegis.core.validators import ValidationError
 @pytest.mark.parametrize("name", [
     "Block torrent client",
     "web-server rule (in)",
-    "App [ICEBOX] 01",
+    "App [TEAM] 01",
 ])
 def test_valid_names_pass(name):
     assert validators.validate_name(name) == name.strip()
