@@ -35,6 +35,24 @@ _GUIDANCE: dict[str, str] = {
               "Disconnect from the network now and shut the machine down to limit damage."),
     "T1543": ("A service or startup item was added or changed, a way malware survives "
               "reboots. Confirm you installed something recently; otherwise remove it."),
+    "T1562": ("A protection on this computer was turned off or weakened. Turn it back on "
+              "(the Security Check page can fix most of these for you) and, if you did not "
+              "change it yourself, scan the machine: malware disables defences first."),
+    "T1562.001": ("A security tool or setting, such as the firewall or antivirus, was "
+                  "switched off. Turn it back on from the Security Check page and find out "
+                  "what changed it."),
+    "T1110": ("Someone is trying passwords against an account on this computer. Make sure "
+              "the account has a long, unique password, block the address it comes from "
+              "(aegis block <ip>), and close the service to the internet if you do not "
+              "need it reachable."),
+    "T1110.003": ("One password is being tried against many accounts from a single place, "
+                  "which avoids locking any single account. Block that address and check "
+                  "whether any of the accounts signed in successfully."),
+    "T1136": ("A new account was created on this computer. If you did not create it, "
+              "disable it, change the passwords of your own accounts, and look for how "
+              "it was added."),
+    "T1136.001": ("A new local account was created. If you did not create it, disable it "
+                  "and treat this computer as compromised until you know who did."),
     "T1098": ("An account or its access keys were modified. Verify the change was intended "
               "and review which accounts can log in."),
     "T1565": ("A system file that controls security or name resolution was changed. Compare "

@@ -15,6 +15,17 @@ All notable changes to Aegis are documented here. The format is based on
 - DNS telemetry, so threat intel can match malicious domains as well as IPs.
 
 ### Added
+- **Sign-in monitoring**: a collector reads the platform's own security record
+  (Windows Security log via PowerShell, `/var/log/auth.log`, `/var/log/secure`
+  or the journal on Linux) and emits `AuthEvent`s for refused and accepted
+  sign-ins, new accounts, administrator-group changes and lockouts. Six rules
+  cover password guessing (T1110), spraying (T1110.003), a success straight
+  after failures, new accounts (T1136.001), granted admin rights (T1098) and
+  lockouts. Windows needs administrator rights; macOS is unsupported and says so.
+- **Setting-change alerts**: every security check is compared with the previous
+  one, and anything that got worse raises a `POSTURE-CHANGED` finding
+  (T1562.001). The check also re-runs on a timer while monitoring
+  (`security_recheck_minutes`, default 60).
 - **Safe hardening** (`aegis harden`, and a *Fix* button plus *Fix history* with
   *Undo* on the Security Check page). Every fix explains the risk, shows the exact
   change, requires confirmation, refuses up front without Administrator/root,

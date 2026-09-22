@@ -18,6 +18,7 @@ class SettingsView(BaseView):
         self.monitoring = ft.Switch(value=settings.monitoring_enabled, active_color=theme.PRIMARY)
         self.threat_intel = ft.Switch(value=settings.threat_intel_enabled, active_color=theme.PRIMARY)
         self.anomaly = ft.Switch(value=settings.anomaly_detection_enabled, active_color=theme.PRIMARY)
+        self.auth = ft.Switch(value=settings.auth_monitoring_enabled, active_color=theme.PRIMARY)
         self.notifications = ft.Switch(value=settings.desktop_notifications, active_color=theme.PRIMARY)
         self.auto_respond = ft.Switch(value=self.service.auto_respond, active_color=theme.DANGER)
         self.space = ft.Switch(value=settings.space_background, active_color=theme.PRIMARY)
@@ -53,6 +54,9 @@ class SettingsView(BaseView):
                 row("Smart unusual-activity detection",
                     "Learn what is normal for this computer and flag connections that stand out",
                     self.anomaly),
+                row("Watch sign-ins",
+                    "Alert on repeated wrong passwords, new accounts and accounts given "
+                    "administrator rights. Needs administrator rights on Windows.", self.auth),
             ], spacing=10)),
             c.panel(ft.Column([
                 c.section_title("Alerts", ft.Icons.NOTIFICATIONS_OUTLINED),
@@ -134,6 +138,7 @@ class SettingsView(BaseView):
         settings.monitoring_enabled = self.monitoring.value
         settings.threat_intel_enabled = self.threat_intel.value
         settings.anomaly_detection_enabled = self.anomaly.value
+        settings.auth_monitoring_enabled = self.auth.value
         settings.desktop_notifications = self.notifications.value
         settings.threat_score_alert_threshold = int(self.threshold.value)
         settings.network_poll_interval = interval

@@ -33,6 +33,11 @@ class EventType(StrEnum):
     FILE_CREATED = "file_created"
     FILE_MODIFIED = "file_modified"
     FILE_DELETED = "file_deleted"
+    AUTH_FAILURE = "auth_failure"            # a sign-in was refused
+    AUTH_SUCCESS = "auth_success"            # a sign-in was accepted
+    ACCOUNT_CREATED = "account_created"      # a new user account
+    ACCOUNT_PRIVILEGED = "account_privileged"  # an account gained admin rights
+    ACCOUNT_LOCKED = "account_locked"        # an account was locked out
 
 
 class EventSource(StrEnum):
@@ -43,6 +48,7 @@ class EventSource(StrEnum):
     ETW = "etw"                # Event Tracing for Windows (kernel-grade)
     FIREWALL = "firewall"      # Windows Firewall / netsh
     FILESYSTEM = "filesystem"  # file integrity baseline comparison
+    AUTH_LOG = "auth_log"      # the OS sign-in record (Security log, auth.log, journal)
     SYSTEM = "system"          # Aegis itself
 
 
@@ -124,6 +130,49 @@ class ProcessEvent(Event):
         if self.parent_name:
             return f"{name} (pid {self.pid}), started by {self.parent_name} (pid {self.ppid})"
         return f"{name} (pid {self.pid}, parent pid {self.ppid})"
+
+
+@dataclass(frozen=True)
+class AuthEvent(Event):
+    """A sign-in attempt, or a change to an account, as the OS recorded it.
+
+    ``user`` is who signed in (or was refused); ``actor`` is who made an account
+    change. ``source_ip`` is the machine the attempt came from, empty for a
+    local sign-in. Passwords never appear here: the OS does not log them and
+    Aegis never asks for them.
+    """
+
+    user: str = ""
+    actor: str = ""
+    source_ip: str = ""
+    method: str = ""        # e.g. "network", "remote desktop", "ssh", "sudo"
+    reason: str = ""        # why it failed, in the OS's words
+    group: str = ""         # the group an account was added to
+    record_id: str = ""     # the OS log record, so the same entry is read once
+
+    @property
+    def who(self) -> str:
+        return self.user or self.actor or "unknown user"
+
+    @property
+    def where(self) -> str:
+        return f" from {self.source_ip}" if self.source_ip else ""
+
+    def summary(self) -> str:
+        if self.type is EventType.AUTH_FAILURE:
+            reason = f" ({self.reason})" if self.reason else ""
+            return f"Sign-in refused for {self.who}{self.where} via {self.method or 'login'}{reason}"
+        if self.type is EventType.AUTH_SUCCESS:
+            return f"Signed in as {self.who}{self.where} via {self.method or 'login'}"
+        if self.type is EventType.ACCOUNT_CREATED:
+            by = f", created by {self.actor}" if self.actor else ""
+            return f"New account {self.user}{by}"
+        if self.type is EventType.ACCOUNT_PRIVILEGED:
+            by = f", by {self.actor}" if self.actor else ""
+            return f"{self.user} added to {self.group or 'an administrator group'}{by}"
+        if self.type is EventType.ACCOUNT_LOCKED:
+            return f"Account {self.user} locked out{self.where}"
+        return f"{self.type.value} for {self.who}"
 
 
 @dataclass(frozen=True)

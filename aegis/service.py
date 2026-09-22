@@ -18,6 +18,7 @@ import threading
 from datetime import datetime, timedelta
 
 from aegis.alerting.notifier import Notifier
+from aegis.collectors.auth import AuthCollector
 from aegis.collectors.base import Collector
 from aegis.collectors.filesystem import FileIntegrityCollector
 from aegis.collectors.network import NetworkCollector
@@ -27,6 +28,7 @@ from aegis.core.events import Event, NetworkEvent, ProcessEvent
 from aegis.core.models import Alert, AuditEvent, Finding, FirewallRule, Severity
 from aegis.detection.engine import DetectionEngine
 from aegis.detection.trust import is_trusted
+from aegis.posture.watch import TACTIC, TECHNIQUE, regressions
 from aegis.response.factory import get_firewall
 from aegis.response.firewall import FirewallResponder
 from aegis.storage.database import SQLiteEventStore
@@ -71,6 +73,7 @@ class SecurityService:
         # An explicit empty list means "no collectors" (events are fed in by hand).
         self.collectors: list[Collector] = collectors if collectors is not None else [
             NetworkCollector(), ProcessCollector(), FileIntegrityCollector(),
+            AuthCollector(state_path=DATA_DIR / "auth_state.json"),
         ]
         self.auto_respond = auto_respond
 
@@ -132,6 +135,7 @@ class SecurityService:
             self._threads.append(t)
         if self.forwarder is not None:
             self.forwarder.start()
+        self._start_security_recheck()
         self.audit("SYSTEM", "monitoring_started", Severity.INFO, "Live monitoring started.")
         log.info("SecurityService started with %d collectors.", len(self._threads))
 
@@ -185,6 +189,10 @@ class SecurityService:
     def _interval_for(self, collector: Collector) -> float:
         if collector.name == "processes":
             return max(1.0, settings.process_poll_interval)
+        if collector.name == "auth":
+            # Reading the Security log shells out to PowerShell; polling it as
+            # often as the socket table would cost more than it is worth.
+            return max(10.0, settings.auth_poll_interval)
         if collector.name == "filesystem":
             # Walking and hashing a tree is orders of magnitude heavier than
             # reading the socket table, so FIM runs on its own slow interval.
@@ -282,9 +290,47 @@ class SecurityService:
 
     # -- security check ----------------------------------------------------- #
     def record_posture(self, report) -> None:
-        """Remember the latest security-check result and export it if enabled."""
-        self.latest_posture = report
+        """Remember the latest security-check result, and alert on anything that got worse."""
+        previous, self.latest_posture = self.latest_posture, report
+        for regression in regressions(previous, report):
+            self._handle_finding(self._setting_changed(regression))
         self._export(report)
+
+    @staticmethod
+    def _setting_changed(regression) -> Finding:
+        """A security setting that was healthy and no longer is, as a finding."""
+        return Finding(
+            rule_id="POSTURE-CHANGED",
+            title=regression.headline,
+            severity=regression.severity,
+            score=80 if regression.severity >= Severity.HIGH else 55,
+            technique=TECHNIQUE,
+            tactic=TACTIC,
+            description=("A security setting on this computer is weaker than it was at the "
+                         "last check. Malware turns protections off, and so do people who "
+                         "forget to turn them back on."),
+            reasons=regression.reasons(),
+            entity=f"setting:{regression.check_id}",
+            source_summary=regression.result.summary)
+
+    def _start_security_recheck(self) -> None:
+        """Re-run the security check on a timer so switched-off protections surface."""
+        minutes = settings.security_recheck_minutes
+        if minutes <= 0:
+            return
+
+        def loop() -> None:
+            while not self._stop.wait(max(60.0, minutes * 60)):
+                try:
+                    from aegis.posture import run_posture_checks
+
+                    self.record_posture(run_posture_checks())
+                except Exception:  # noqa: BLE001 - a failed check must not stop monitoring
+                    log.exception("Scheduled security check failed")
+
+        thread = threading.Thread(target=loop, name="security-recheck", daemon=True)
+        thread.start()
+        self._threads.append(thread)
 
     # -- optional export ---------------------------------------------------- #
     def _export(self, item, **options) -> None:

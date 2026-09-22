@@ -16,6 +16,13 @@ secondary (see [`ML_EVALUATION.md`](ML_EVALUATION.md)).
 | `NET-SCAN` | Possible network scanning / sweep | **T1046** | Discovery | HIGH | Within 60 s, one PID → ≥10 hosts on the same non-web port, or ≥15 ports on one host; ports 80/443 ignored; reported once per 10 min |
 | `NET-LISTEN-SENSITIVE` | Listening on a sensitive port | **T1571** | Command & Control | MEDIUM | Bind/listen on a backdoor-associated port |
 | `NET-UNCOMMON-PORT` | Uncommon port to a public host | **T1571** | Command & Control | LOW | Non-standard high port to public IP (weak signal) |
+| `AUTH-GUESSING` | Repeated failed sign-ins | **T1110** | Credential Access | HIGH | ≥6 refused sign-ins for one account or from one address within 5 min |
+| `AUTH-SPRAY` | One password tried against many accounts | **T1110.003** | Credential Access | HIGH | ≥4 different accounts refused from one address in 15 min |
+| `AUTH-GUESSED-PASSWORD` | Sign-in succeeded after repeated failures | **T1110** | Credential Access | CRITICAL | A success within 10 min of ≥4 failures for the same account or address |
+| `AUTH-NEW-ACCOUNT` | New user account created | **T1136.001** | Persistence | MEDIUM | Windows 4720, or `useradd` in the auth log |
+| `AUTH-ADMIN-GRANTED` | Account given administrator rights | **T1098** | Persistence | HIGH | Added to Administrators / sudo / wheel |
+| `AUTH-LOCKOUT` | Account locked out | **T1110** | Credential Access | MEDIUM | Windows 4740 |
+| `POSTURE-CHANGED` | Security setting changed for the worse | **T1562.001** | Defense Evasion | HIGH | A security check that passed now warns or fails |
 | `PROC-SUSPICIOUS-PATH` | Process from a suspicious location | **T1036** | Defense Evasion | MEDIUM | Temp/Downloads exec, non-absolute path, name spoof |
 | `ML-ANOMALY` | Anomalous connection (ML assist) | — | (assist) | LOW–MED | IsolationForest outlier vs learned baseline |
 
@@ -32,7 +39,11 @@ secondary (see [`ML_EVALUATION.md`](ML_EVALUATION.md)).
 
 ## Telemetry limits (what these rules cannot see)
 
-These rules run on `psutil` socket/process polling. Techniques requiring
+Sign-in rules read the platform's own record: the Windows Security log (which
+needs administrator rights) or `/var/log/auth.log`, `/var/log/secure` or the
+journal on Linux. Without those, Aegis says sign-in monitoring is unavailable
+rather than reporting quiet. macOS is not supported: its unified log cannot be
+polled cheaply. The other rules run on `psutil` socket/process polling. Techniques requiring
 kernel/ETW/Sysmon telemetry — **process injection (T1055)**, in-memory execution,
 registry-based **persistence (T1547)** — are out of scope until the Sysmon/ETW
 collectors are added. This is stated plainly in [`THREAT_MODEL.md`](THREAT_MODEL.md).

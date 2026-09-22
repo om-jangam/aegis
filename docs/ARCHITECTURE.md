@@ -77,13 +77,14 @@ to SENTINEL-X when the user enables it.
 | `core/events.py` | Normalized, immutable telemetry: `NetworkEvent`, `ProcessEvent`, `FileEvent`. |
 | `core/models.py` | Domain models: `Severity`, `Finding`, `Alert`, `AuditEvent`, `FirewallRule`. |
 | `core/validators.py` | Input validation for rule fields; the front line against command injection. |
-| `collectors/` | psutil network and process collectors, and file integrity monitoring (baseline + digest comparison). |
+| `collectors/` | psutil network and process collectors, file integrity monitoring (baseline + digest comparison), and sign-in monitoring reading the OS security log. |
 | `detection/engine.py`, `base.py` | Offers each event to the rules that want it; shared rolling `DetectionContext`. |
 | `detection/rules/` | Hand-written, stateful, ATT&CK-mapped rules (network, process, file, threat intel). |
 | `detection/sigma/` | Loader, condition parser and field mapping for Sigma rules; bundled rules in `sigma/rules/`. |
 | `detection/ruleset.py` | Combines built-in and Sigma rules into the active rule set. |
 | `detection/ml_assist.py` | IsolationForest anomaly assist (evaluated in `docs/ML_EVALUATION.md`). |
 | `detection/trust.py`, `guidance.py` | Programs the user trusts; plain-language "what to do" advice per technique. |
+| `posture/watch.py` | Compares one security check with the previous one, so a protection that is switched off raises an alert (T1562.001) instead of only lowering the score. |
 | `posture/` | The security check: firewall, exposed services, updates, startup programs, Defender, UAC, RDP, SMBv1, auto-logon, disk encryption, SSH, sensitive file permissions. Produces a scored `PostureReport`. |
 | `hardening/` | Safe fixes for weaknesses the check finds. `HardeningEngine` enforces confirm → admin check → backup → apply (rollback on failure) → verify → record for every `Fix`; history lives in the `remediations` table with undo. |
 | `intel/` | Local threat-intel blocklists (IPs and CIDR ranges) and the feed downloader. |

@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from aegis.config import DB_PATH
-from aegis.core.events import Event, EventType, NetworkEvent, ProcessEvent
+from aegis.core.events import AuthEvent, Event, EventType, NetworkEvent, ProcessEvent
 from aegis.core.models import Alert, AuditEvent, Finding, Remediation, Severity
 from aegis.storage.base import EventStore
 
@@ -154,6 +154,11 @@ class SQLiteEventStore(EventStore):
                                 "username": e.username})
             return (ts, e.type.value, e.source.value, e.pid, e.name, None,
                     None, None, None, None, None, None, extra)
+        if isinstance(e, AuthEvent):
+            extra = json.dumps({"user": e.user, "actor": e.actor, "method": e.method,
+                                "reason": e.reason, "group": e.group})
+            return (ts, e.type.value, e.source.value, None, e.user, None,
+                    None, None, e.source_ip or None, None, None, None, extra)
         return (ts, e.type.value, e.source.value, None, None, None,
                 None, None, None, None, None, None, None)
 

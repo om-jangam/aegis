@@ -60,6 +60,15 @@ class Settings:
     process_poll_interval: float = 3.0      # seconds between process scans
     monitoring_enabled: bool = True
 
+    # Sign-in monitoring (the OS security log: failed logins, new accounts)
+    auth_monitoring_enabled: bool = True
+    auth_poll_interval: float = 30.0
+
+    # Re-run the security check on this interval while monitoring, so a setting
+    # that is switched off (firewall, antivirus) raises an alert rather than
+    # waiting to be noticed. 0 disables the re-check.
+    security_recheck_minutes: float = 60.0
+
     # File integrity monitoring
     fim_enabled: bool = True
     # Filesystem scans are far heavier than a socket table read, so FIM polls on
