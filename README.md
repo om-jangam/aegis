@@ -84,6 +84,8 @@ Score 81/100 (grade B): 1 failed, 1 warnings, 6 passed, 0 skipped
 | 🌐 **Threat intelligence** | Flags connections to known botnet C2 and criminal networks (abuse.ch Feodo, Emerging Threats, Spamhaus DROP, or your own lists), even on port 443 |
 | 🧠 **Detection engine** | Explainable Python rules plus Sigma rules, all mapped to **MITRE ATT&CK**; every finding carries its technique, score and reasons |
 | 🗣️ **Plain-language guidance** | Every detected technique comes with "what this means and what to do" |
+| 🛑 **Stop a program** | Close a suspicious program from an alert or the programs list. Parts of the operating system are refused, and Aegis never stops itself |
+| 📦 **Quarantine** | Move a file out of reach into a private folder, keeping its digest and original path so it can always be put back. Never deletes |
 | 🧱 **Containment** | Block a host via Windows Firewall (`netsh`), nftables or pf: argument lists only, **no `shell=True`**, full input validation |
 | 📊 **Web dashboard** | `aegis serve`: score, alerts, findings, top techniques and talkers, audit trail; token-protected, loopback-only by default |
 | 📄 **Reports** | `aegis report`: one self-contained HTML file with a prioritised to-do list, ready to email or print |
@@ -102,6 +104,8 @@ Score 81/100 (grade B): 1 failed, 1 warnings, 6 passed, 0 skipped
 | `aegis report [-o file.html]` | Shareable HTML security report |
 | `aegis intel update` / `status` / `lookup <ip>` | Manage and query threat-intel blocklists |
 | `aegis block <ip> [--note ...]` | Contain a remote host (needs Administrator / root) |
+| `aegis stop <pid> [--yes]` | Stop a running program, after confirmation |
+| `aegis quarantine <file> \| --list \| --restore <id>` | Move a file out of reach, or put it back |
 | `aegis rules [--all]` | List firewall rules Aegis manages |
 | `aegis sigma [paths] [--list]` | Report how much of a Sigma rule set Aegis can evaluate |
 | `aegis status` | Platform, privileges, firewall backend, rule count |

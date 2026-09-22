@@ -14,6 +14,8 @@ Commands
 ``aegis status``    report platform, firewall backend and privileges
 ``aegis rules``     list the firewall rules Aegis manages
 ``aegis block``     contain a remote host
+``aegis stop``      stop a running program
+``aegis quarantine`` move a file out of reach, or put it back
 ``aegis check``     audit this computer's security settings
 ``aegis harden``    safely fix what the check found, with undo
 ``aegis console``   launch the desktop UI (default)
@@ -283,6 +285,71 @@ def cmd_block(args) -> int:
     result = backend.block_ip(args.ip, note=args.note)
     print(result.message, file=sys.stdout if result.ok else sys.stderr)
     return 0 if result.ok else 1
+
+
+def _service_for_actions():
+    """A service with no collectors: just the store, for one-off actions."""
+    from aegis.service import SecurityService
+
+    return SecurityService(collectors=[], ml=None, forwarder=None)
+
+
+def cmd_stop(args) -> int:
+    """Stop a running program, after confirming it is not part of the system."""
+    import psutil
+
+    try:
+        proc = psutil.Process(args.pid)
+        name = proc.name()
+    except psutil.Error as exc:
+        print(f"Cannot read process {args.pid}: {exc}", file=sys.stderr)
+        return 1
+    print(f"Process {args.pid} is {name}")
+    if not _confirmed(args, f"Stop {name} (process {args.pid})?"):
+        print("Cancelled. Nothing was stopped.")
+        return 1
+    service = _service_for_actions()
+    try:
+        result = service.stop_process(args.pid, name, confirmed=True, reason=args.note)
+    finally:
+        service.close()
+    print(result.message, file=sys.stdout if result.ok else sys.stderr)
+    return 0 if result.ok else 1
+
+
+def cmd_quarantine(args) -> int:
+    """Move a file out of reach, list what is quarantined, or put a file back."""
+    service = _service_for_actions()
+    try:
+        if args.list:
+            records = service.quarantine.records()
+            if not records:
+                print("Nothing is quarantined.")
+                return 0
+            for record in records:
+                state = "restored" if record.restored_at else "quarantined"
+                print(f"{record.id}  {record.quarantined_at}  {state:<11} "
+                      f"{record.original_path}")
+                if record.reason:
+                    print(f"            {record.reason}")
+            return 0
+        if args.restore:
+            result = service.restore_quarantined(args.restore, confirmed=True)
+            print(result.message, file=sys.stdout if result.ok else sys.stderr)
+            return 0 if result.ok else 1
+        if not args.path:
+            print("Give a file to quarantine, --list or --restore <id>.", file=sys.stderr)
+            return 2
+        print(f"{args.path} will be moved to a private folder and can be put back with "
+              f"'aegis quarantine --restore <id>'.")
+        if not _confirmed(args, f"Quarantine {args.path}?"):
+            print("Cancelled. Nothing was moved.")
+            return 1
+        result = service.quarantine_file(args.path, confirmed=True, reason=args.note)
+        print(result.message, file=sys.stdout if result.ok else sys.stderr)
+        return 0 if result.ok else 1
+    finally:
+        service.close()
 
 
 def cmd_sigma(args) -> int:
@@ -828,6 +895,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_block.add_argument("ip", help="the address to block")
     p_block.add_argument("--note", default="manual", help="reason, recorded in the audit trail")
     p_block.set_defaults(func=cmd_block)
+
+    p_stop = sub.add_parser("stop", help="stop a running program")
+    p_stop.add_argument("pid", type=int, help="the process number to stop")
+    p_stop.add_argument("--note", default="manual", help="reason, recorded in the audit trail")
+    p_stop.add_argument("--yes", action="store_true", help="confirm without asking")
+    p_stop.set_defaults(func=cmd_stop)
+
+    p_quarantine = sub.add_parser(
+        "quarantine", help="move a file out of reach, or put it back",
+        description="Quarantine moves a file to a private folder and keeps its digest and "
+                    "original path, so it can always be restored. Files that belong to the "
+                    "operating system are refused.")
+    p_quarantine.add_argument("path", nargs="?", help="the file to quarantine")
+    p_quarantine.add_argument("--list", action="store_true", help="show quarantined files")
+    p_quarantine.add_argument("--restore", metavar="ID", help="put a quarantined file back")
+    p_quarantine.add_argument("--note", default="manual",
+                              help="reason, recorded in the audit trail")
+    p_quarantine.add_argument("--yes", action="store_true", help="confirm without asking")
+    p_quarantine.set_defaults(func=cmd_quarantine)
 
     p_console = sub.add_parser("console", help="launch the desktop UI")
     p_console.set_defaults(func=cmd_console)

@@ -29,6 +29,7 @@ from aegis.core.models import Alert, AuditEvent, Finding, FirewallRule, Severity
 from aegis.detection.engine import DetectionEngine
 from aegis.detection.trust import is_trusted
 from aegis.posture.watch import TACTIC, TECHNIQUE, regressions
+from aegis.response.actions import ProcessStopper, Quarantine
 from aegis.response.factory import get_firewall
 from aegis.response.firewall import FirewallResponder
 from aegis.storage.database import SQLiteEventStore
@@ -86,6 +87,9 @@ class SecurityService:
         self._alert_listeners = []
         self._alerted: dict[tuple[str, str], datetime] = {}
 
+        #: Containment actions on this computer, each confirmed by a person.
+        self.stopper = ProcessStopper()
+        self.quarantine = Quarantine(DATA_DIR / "quarantine")
         #: Latest security-check report (attached to exported heartbeats).
         self.latest_posture = None
         self._hardening = None
@@ -358,6 +362,30 @@ class SecurityService:
         result = self.firewall.set_rule_enabled(name, enabled)
         self.audit("RULE", "rule_toggled", Severity.INFO,
                    f"{'Enable' if enabled else 'Disable'} '{name}'", result.message)
+        return result
+
+    def stop_process(self, pid: int, name: str = "", *, confirmed: bool = False,
+                     reason: str = "manual"):
+        """Stop a running program (after confirmation), and record the attempt."""
+        result = self.stopper.stop(pid, name, confirmed=confirmed, reason=reason)
+        self.audit("RESPONSE", "process_stopped" if result.ok else "process_stop_refused",
+                   Severity.MEDIUM if result.ok else Severity.INFO,
+                   f"Stop {name or 'process'} (pid {pid})", result.message)
+        return result
+
+    def quarantine_file(self, path, *, confirmed: bool = False, reason: str = "manual"):
+        """Move a file out of reach (after confirmation), keeping it restorable."""
+        result = self.quarantine.add(path, confirmed=confirmed, reason=reason)
+        self.audit("RESPONSE", "file_quarantined" if result.ok else "quarantine_refused",
+                   Severity.MEDIUM if result.ok else Severity.INFO,
+                   f"Quarantine {path}", result.message)
+        return result
+
+    def restore_quarantined(self, record_id: str, *, confirmed: bool = False):
+        """Put a quarantined file back where it was."""
+        result = self.quarantine.restore(record_id, confirmed=confirmed)
+        self.audit("RESPONSE", "file_restored" if result.ok else "restore_refused",
+                   Severity.INFO, f"Restore quarantined file {record_id}", result.message)
         return result
 
     def block_ip(self, ip: str, note: str = "manual"):

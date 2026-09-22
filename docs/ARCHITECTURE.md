@@ -88,6 +88,7 @@ to SENTINEL-X when the user enables it.
 | `posture/` | The security check: firewall, exposed services, updates, startup programs, Defender, UAC, RDP, SMBv1, auto-logon, disk encryption, SSH, sensitive file permissions. Produces a scored `PostureReport`. |
 | `hardening/` | Safe fixes for weaknesses the check finds. `HardeningEngine` enforces confirm → admin check → backup → apply (rollback on failure) → verify → record for every `Fix`; history lives in the `remediations` table with undo. |
 | `intel/` | Local threat-intel blocklists (IPs and CIDR ranges) and the feed downloader. |
+| `response/actions.py` | Containment on this computer: stop a program (refusing system processes and Aegis itself) and quarantine a file (move, never delete, always restorable). Both require explicit confirmation and are audited. |
 | `response/` | `FirewallBackend` contract with Windows (`netsh`), Linux (`nftables`) and macOS (`pf` anchor) engines; argument-list execution, never a shell. `NullFirewall` when no backend is usable. |
 | `storage/` | `EventStore` contract and its SQLite (WAL) implementation for events, findings, alerts, audit and fix history. |
 | `alerting/notifier.py` | Desktop notifications with cooldown de-duplication. |

@@ -47,6 +47,26 @@ class ProcessesView(BaseView):
         self.count.value = plural(len(procs), "program")
         self.safe_update()
 
+    def _confirm_stop(self, proc) -> None:
+        """Ask before stopping a program, and say what stopping it means."""
+        def stop(e):
+            self.page.pop_dialog()
+            result = self.service.stop_process(proc.pid, proc.name, confirmed=True,
+                                               reason="stopped from Running Programs")
+            self.app.toast(result.message, ok=result.ok)
+            self.refresh()
+
+        self.page.show_dialog(ft.AlertDialog(
+            modal=True, title=ft.Text(f"Stop {proc.name}?"),
+            content=ft.Text(
+                f"{proc.name} (process {proc.pid}) will be asked to close, and closed "
+                f"firmly if it refuses. Anything it has not saved is lost, and a program "
+                f"the computer needs may start again by itself.\n\n"
+                f"{proc.exe or 'Location not available'}", width=460),
+            actions=[ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog()),
+                     ft.FilledButton("Stop program", icon=ft.Icons.STOP_CIRCLE_OUTLINED,
+                                     on_click=stop)]))
+
     def _row(self, p) -> ft.Control:
         sus = p.is_suspicious
         pills = [c.pill(f"{p.memory_mb:.0f} MB memory", theme.TEXT_MUTED)]
@@ -66,6 +86,9 @@ class ProcessesView(BaseView):
                             color=theme.WARN) if sus else ft.Container(height=0),
                 ], spacing=1, expand=True, tight=True),
                 *pills,
+                ft.TextButton("Stop", icon=ft.Icons.STOP_CIRCLE_OUTLINED,
+                              tooltip=f"Stop {p.name} (process {p.pid})",
+                              on_click=lambda e, proc=p: self._confirm_stop(proc)),
             ], spacing=12),
             padding=ft.Padding.symmetric(horizontal=14, vertical=8),
             bgcolor=ft.Colors.with_opacity(0.08, theme.WARN) if sus else theme.SURFACE_ALT,

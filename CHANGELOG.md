@@ -15,6 +15,13 @@ All notable changes to Aegis are documented here. The format is based on
 - DNS telemetry, so threat intel can match malicious domains as well as IPs.
 
 ### Added
+- **Containment on this computer**: `aegis stop <pid>` and a *Stop* button on
+  alerts and in Running Programs close a suspicious program (operating-system
+  processes and Aegis itself are refused, and the process name must still match
+  so a reused PID is never killed); `aegis quarantine <file>` moves a file to a
+  private folder with its digest and original path recorded, and
+  `--restore <id>` puts it back. Nothing is deleted, every action needs explicit
+  confirmation, and refusals are audited alongside successes.
 - **Sign-in monitoring**: a collector reads the platform's own security record
   (Windows Security log via PowerShell, `/var/log/auth.log`, `/var/log/secure`
   or the journal on Linux) and emits `AuthEvent`s for refused and accepted

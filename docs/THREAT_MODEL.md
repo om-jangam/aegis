@@ -113,6 +113,7 @@ is measured, not assumed.
 | **Denial of service** | Monitor thread crashes the app | Collectors/monitors wrap work in guarded loops; a failure logs and continues, never kills the app |
 | **Tampering** | A fix leaves the machine half-changed or unbootable | One engine enforces confirm → privilege check → backup → apply → verify for every fix; a failed step restores the backup; SSH changes are validated with `sshd -t` before reload; only reversible, low-blast-radius settings are automated |
 | **Repudiation** | "Aegis changed my settings" | Every fix and undo, including refusals and failures, is recorded in the fix history and the audit trail with the exact before/after values |
+| **Tampering** | A containment action breaks the computer | Stopping a program refuses operating-system processes and Aegis itself, and checks the process name so a reused process number is never killed; quarantine moves files instead of deleting them, refuses system folders, and keeps the digest and original path so anything can be put back |
 | **Elevation of privilege** | Tool tricked into misusing admin rights | Least privilege: **read-only views need no admin**; only rule *changes* require it, and Aegis detects/report its own privilege level |
 
 ## 7. Key security controls (summary)

@@ -61,6 +61,11 @@ class DetectionsView(BaseView):
                 f"Trust {candidate}", icon=ft.Icons.VERIFIED_OUTLINED,
                 tooltip=f"Stop alerts about {candidate} and the programs it starts",
                 on_click=lambda e, name=candidate, alert=a: self._confirm_trust(name, alert)))
+        if a.process_name:
+            actions.append(ft.TextButton(
+                f"Stop {a.process_name}", icon=ft.Icons.STOP_CIRCLE_OUTLINED,
+                tooltip=f"Close {a.process_name} now",
+                on_click=lambda e, name=a.process_name: self._confirm_stop(name)))
         actions.append(c.pill("Reviewed", theme.OK) if a.acknowledged else
                        ft.TextButton("Mark as reviewed", icon=ft.Icons.CHECK,
                                      on_click=lambda e, i=a.id: self._review(i)))
@@ -100,6 +105,37 @@ class DetectionsView(BaseView):
     def _review(self, alert_id) -> None:
         self.service.store.acknowledge_alert(alert_id)
         self.refresh()
+
+    def _confirm_stop(self, name: str) -> None:
+        """Stop every copy of the program this alert is about, after confirmation."""
+        from aegis.collectors.processes import snapshot
+
+        running = [p for p in snapshot() if p.name.lower() == name.lower()]
+        if not running:
+            self.app.toast(f"{name} is not running any more.", ok=True)
+            return
+
+        def stop(e):
+            self.page.pop_dialog()
+            results = [self.service.stop_process(p.pid, p.name, confirmed=True,
+                                                 reason="stopped from an alert")
+                       for p in running]
+            stopped = sum(1 for r in results if r.ok)
+            message = (f"Stopped {plural(stopped, 'copy', 'copies')} of {name}."
+                       if stopped else results[0].message)
+            self.app.toast(message, ok=bool(stopped))
+            self.refresh()
+
+        self.page.show_dialog(ft.AlertDialog(
+            modal=True, title=ft.Text(f"Stop {name}?"),
+            content=ft.Text(
+                f"{plural(len(running), 'copy', 'copies')} of {name} "
+                f"{'is' if len(running) == 1 else 'are'} running and will be closed. "
+                f"Anything unsaved is lost. If the program is part of Windows, Aegis will "
+                f"refuse and tell you.", width=460),
+            actions=[ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog()),
+                     ft.FilledButton("Stop program", icon=ft.Icons.STOP_CIRCLE_OUTLINED,
+                                     on_click=stop)]))
 
     def _confirm_trust(self, name: str, alert) -> None:
         def trust(e):
