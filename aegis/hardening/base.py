@@ -42,15 +42,21 @@ class Change:
 # --------------------------------------------------------------------------- #
 # Default, real-system writers
 # --------------------------------------------------------------------------- #
-def _write_registry(key_path: str, name: str, value, kind: str) -> None:
-    """Set (or, when ``value`` is None, delete) a value under HKEY_LOCAL_MACHINE."""
+def _write_registry(hive: str, key_path: str, name: str, value, kind: str) -> None:
+    """Set (or, when ``value`` is None, delete) a registry value.
+
+    ``hive`` is "HKLM" for computer-wide settings or "HKCU" for this user's own.
+    """
     try:
         import winreg
     except ImportError as exc:
         raise HardeningError("The Windows registry is not available here.") from exc
+    root = {"HKLM": winreg.HKEY_LOCAL_MACHINE, "HKCU": winreg.HKEY_CURRENT_USER}.get(hive)
+    if root is None:
+        raise HardeningError(f"Unknown registry hive {hive!r}.")
     access = winreg.KEY_SET_VALUE | getattr(winreg, "KEY_WOW64_64KEY", 0)
     try:
-        with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path, 0, access) as key:
+        with winreg.CreateKeyEx(root, key_path, 0, access) as key:
             if value is None:
                 try:
                     winreg.DeleteValue(key, name)
@@ -63,7 +69,7 @@ def _write_registry(key_path: str, name: str, value, kind: str) -> None:
     except PermissionError as exc:
         raise HardeningError("Changing this setting needs administrator rights.") from exc
     except OSError as exc:
-        raise HardeningError(f"Could not change HKLM\\{key_path}\\{name}: {exc}") from exc
+        raise HardeningError(f"Could not change {hive}\\{key_path}\\{name}: {exc}") from exc
 
 
 def _write_text(path: str, text: str) -> None:
@@ -98,7 +104,7 @@ def _chmod(path: str, mode: int) -> None:
 class HardeningContext(PostureContext):
     """A posture context that can also change settings. Swap any writer in tests."""
 
-    write_registry: Callable[[str, str, object, str], None] = _write_registry
+    write_registry: Callable[[str, str, str, object, str], None] = _write_registry
     write_text: Callable[[str, str], None] = _write_text
     chmod: Callable[[str, int], None] = _chmod
 
@@ -170,8 +176,10 @@ class Fix(abc.ABC):
 @dataclass(frozen=True)
 class RegistryValue:
     key: str
+    #: "HKLM" for a computer-wide setting, "HKCU" for this user's own.
     name: str
     target: object          # None means "remove the value"
+    hive: str = "HKLM"
     kind: str = "dword"     # "dword" or "sz"
     #: Never read out, shown or backed up (e.g. a stored password).
     secret: bool = False
@@ -195,15 +203,21 @@ class RegistryFix(Fix):
             return not value.missing_is_safe
         return str(current).strip() != str(value.target)
 
+    @staticmethod
+    def _read(ctx: HardeningContext, value: RegistryValue):
+        if value.hive == "HKLM":
+            return ctx.read_registry(value.key, value.name)
+        return (ctx.registry_values(value.hive, value.key) or {}).get(value.name)
+
     def plan(self, ctx: HardeningContext) -> list[Change]:
         changes = []
         for value in self.VALUES:
-            current = ctx.read_registry(value.key, value.name)
+            current = self._read(ctx, value)
             if not self._pending(current, value):
                 continue
             shown = "(stored, not shown)" if value.secret else _shown(current)
             target = "(removed)" if value.target is None else str(value.target)
-            changes.append(Change(f"HKLM\\{value.key}\\{value.name}", shown, target))
+            changes.append(Change(f"{value.hive}\\{value.key}\\{value.name}", shown, target))
         return changes
 
     def snapshot(self, ctx: HardeningContext) -> dict:
@@ -211,19 +225,21 @@ class RegistryFix(Fix):
         for value in self.VALUES:
             if value.secret:
                 continue
-            current = ctx.read_registry(value.key, value.name)
-            saved.append({"key": value.key, "name": value.name, "kind": value.kind,
+            current = self._read(ctx, value)
+            saved.append({"hive": value.hive, "key": value.key, "name": value.name,
+                          "kind": value.kind,
                           "value": current if isinstance(current, (int, str)) else None})
         return {"registry": saved}
 
     def apply(self, ctx: HardeningContext) -> str:
         for value in self.VALUES:
-            if self._pending(ctx.read_registry(value.key, value.name), value):
-                ctx.write_registry(value.key, value.name, value.target, value.kind)
+            if self._pending(self._read(ctx, value), value):
+                ctx.write_registry(value.hive, value.key, value.name, value.target, value.kind)
         return self.restart_note
 
     def restore(self, ctx: HardeningContext, backup: dict) -> str:
         for item in backup.get("registry", []):
-            ctx.write_registry(item["key"], item["name"], item["value"], item["kind"])
+            ctx.write_registry(item.get("hive", "HKLM"), item["key"], item["name"],
+                               item["value"], item["kind"])
         return self.restart_note
 

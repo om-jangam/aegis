@@ -26,6 +26,12 @@ def _as_int(value) -> int | None:
         return None
 
 
+def _after(text: str, pattern: str, multiline: bool = False) -> str | None:
+    """The first capture of ``pattern`` in ``text``, or None."""
+    match = re.search(pattern, text or "", re.MULTILINE if multiline else 0)
+    return match.group(1) if match else None
+
+
 # --------------------------------------------------------------------------- #
 # Network
 # --------------------------------------------------------------------------- #
@@ -699,6 +705,182 @@ class StartupProgramsCheck(PostureCheck):
         return entries if readable else None
 
 
+# --------------------------------------------------------------------------- #
+# Accounts and sign-in policy
+# --------------------------------------------------------------------------- #
+class PasswordPolicyCheck(PostureCheck):
+    check_id = "POSTURE-PASSWORD-POLICY"
+    title = "Passwords must be long enough, and guessing locks the account"
+    category = "Credentials"
+    severity = Severity.HIGH
+    platforms = (OS.WINDOWS, OS.LINUX)
+    #: Shorter than this is guessable with ordinary hardware.
+    MIN_LENGTH = 8
+    #: More attempts than this without a lockout means guessing can run forever.
+    MAX_ATTEMPTS = 10
+
+    def run(self, ctx: PostureContext) -> CheckResult:
+        return self._windows(ctx) if ctx.os is OS.WINDOWS else self._linux(ctx)
+
+    def _verdict(self, length: int | None, lockout: int | None, details: list[str],
+                 fix: str) -> CheckResult:
+        problems = []
+        if length is not None and length < self.MIN_LENGTH:
+            problems.append(f"the shortest allowed password is {length} characters"
+                            if length else "passwords may be empty")
+        if lockout == 0:
+            problems.append("an account is never locked, so passwords can be guessed forever")
+        elif lockout is not None and lockout > self.MAX_ATTEMPTS:
+            problems.append(f"an account is only locked after {lockout} wrong passwords")
+        if length is None and lockout is None:
+            return self.result(CheckStatus.SKIP, "Could not read the password policy.")
+        if problems:
+            return self.result(CheckStatus.FAIL,
+                               "The password policy is weaker than it should be.",
+                               [p.capitalize() for p in problems] + details, remediation=fix)
+        return self.result(CheckStatus.PASS,
+                           "Passwords must be reasonably long and guessing locks the account.",
+                           details)
+
+    def _windows(self, ctx: PostureContext) -> CheckResult:
+        out = ctx.run(["net", "accounts"])
+        if out is None or out[0] != 0:
+            return self.result(CheckStatus.SKIP, "Could not read the password policy.")
+        length = _as_int(_after(out[1], r"Minimum password length[^:]*:\s*(\S+)"))
+        lockout_text = _after(out[1], r"Lockout threshold[^:]*:\s*(\S+)")
+        lockout = 0 if (lockout_text or "").lower() == "never" else _as_int(lockout_text)
+        details = [f"Minimum password length: {length if length is not None else 'unknown'}",
+                   f"Account locks after: {lockout_text or 'unknown'} wrong passwords"]
+        return self._verdict(length, lockout, details,
+                             fix="Run as Administrator: net accounts /minpwlen:12 "
+                                 "/lockoutthreshold:5 /lockoutduration:15")
+
+    def _linux(self, ctx: PostureContext) -> CheckResult:
+        text = ctx.read_text("/etc/login.defs")
+        if text is None:
+            return self.result(CheckStatus.SKIP, "No /etc/login.defs on this system.")
+        length = _as_int(_after(text, r"^\s*PASS_MIN_LEN\s+(\d+)", multiline=True))
+        faillock = ctx.read_text("/etc/security/faillock.conf") or ""
+        deny = _as_int(_after(faillock, r"^\s*deny\s*=\s*(\d+)", multiline=True))
+        details = [f"Minimum password length: {length if length is not None else 'not set'}"]
+        if deny is not None:
+            details.append(f"Account locks after {deny} wrong passwords")
+        return self._verdict(length, deny, details,
+                             fix="Set PASS_MIN_LEN 12 in /etc/login.defs, and configure "
+                                 "lockouts with pam_faillock (deny=5 in "
+                                 "/etc/security/faillock.conf).")
+
+
+class GuestAccountCheck(PostureCheck):
+    check_id = "POSTURE-GUEST"
+    title = "The guest account is off"
+    category = "Credentials"
+    severity = Severity.HIGH
+    platforms = _WINDOWS
+    remediation = ("Run as Administrator: net user Guest /active:no "
+                   "(the Security Check page can do this for you).")
+
+    def run(self, ctx: PostureContext) -> CheckResult:
+        out = ctx.run(["net", "user", "Guest"])
+        if out is None or out[0] != 0:
+            return self.result(CheckStatus.SKIP, "There is no guest account on this computer.")
+        active = _after(out[1], r"Account active\s+(\S+)")
+        if (active or "").lower() in ("yes", "ja", "oui", "si", "sí"):
+            return self.result(
+                CheckStatus.FAIL,
+                "The guest account is switched on: anyone can sign in without a password.")
+        if not active:
+            return self.result(CheckStatus.SKIP, "Could not read the guest account state.")
+        return self.result(CheckStatus.PASS, "The guest account is switched off.")
+
+
+class RiskyServicesCheck(PostureCheck):
+    check_id = "POSTURE-RISKY-SERVICES"
+    title = "Risky Windows services are not running"
+    category = "Network"
+    severity = Severity.HIGH
+    platforms = _WINDOWS
+    #: Services that are never safe on an ordinary computer: they send passwords
+    #: in clear text or hand out settings to anyone who asks.
+    UNSAFE = {
+        "TlntSvr": "Telnet server (sends passwords in clear text)",
+        "FTPSVC": "FTP server (sends passwords in clear text)",
+        "SNMP": "SNMP (usually left with the default community string)",
+        "simptcp": "Simple TCP/IP Services (old, unauthenticated network services)",
+    }
+    #: Legitimate, but worth knowing about: each one widens what the computer
+    #: offers to the network.
+    QUESTIONABLE = {
+        "RemoteRegistry": "Remote Registry lets other machines read this computer's settings",
+        "SharedAccess": "Internet Connection Sharing shares this computer's network with others",
+        "WinRM": "Windows Remote Management accepts remote PowerShell sessions",
+    }
+    _SCRIPT = ("Get-Service -Name {names} -ErrorAction SilentlyContinue | "
+               "ForEach-Object {{ $_.Name + '=' + $_.Status }}")
+
+    def run(self, ctx: PostureContext) -> CheckResult:
+        names = {**self.UNSAFE, **self.QUESTIONABLE}
+        # Names that do not exist on this machine make PowerShell exit non-zero
+        # even when it printed the services that do, so the output is what counts.
+        out = ctx.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                       self._SCRIPT.format(names=",".join(names))], timeout=45)
+        if out is None:
+            return self.result(CheckStatus.SKIP, "Could not read the list of services.")
+        running = [name for name, status in
+                   (line.split("=", 1) for line in out[1].splitlines() if "=" in line)
+                   if status.strip().lower() == "running"]
+        unsafe = [n for n in running if n in self.UNSAFE]
+        questionable = [n for n in running if n in self.QUESTIONABLE]
+        details = [f"{name}: {names[name]}" for name in unsafe + questionable]
+        fix = ("Turn off what you do not use: Services (services.msc), or run as "
+               "Administrator: sc.exe config <name> start= disabled")
+        if unsafe:
+            return self.result(CheckStatus.FAIL,
+                               f"{len(unsafe)} service(s) that are never safe are running.",
+                               details, remediation=fix)
+        if questionable:
+            return self.result(CheckStatus.WARN,
+                               f"{len(questionable)} service(s) widen what this computer "
+                               f"offers to the network.", details, remediation=fix,
+                               severity=Severity.MEDIUM)
+        if not out[1].strip():
+            return self.result(CheckStatus.PASS, "None of the risky services are installed.")
+        return self.result(CheckStatus.PASS, "No risky services are running.")
+
+
+class ScreenLockCheck(PostureCheck):
+    check_id = "POSTURE-SCREEN-LOCK"
+    title = "The screen locks when the computer is left alone"
+    category = "Privilege"
+    severity = Severity.MEDIUM
+    platforms = _WINDOWS
+    remediation = ("Settings > Personalisation > Lock screen > Screen saver settings: tick "
+                   "'On resume, display logon screen' and set a wait of 15 minutes or less.")
+    _DESKTOP = r"Control Panel\Desktop"
+    #: Longer than this, and a walk-away leaves the screen open.
+    MAX_MINUTES = 15
+
+    def run(self, ctx: PostureContext) -> CheckResult:
+        values = ctx.registry_values("HKCU", self._DESKTOP)
+        if values is None:
+            return self.result(CheckStatus.SKIP, "Could not read the screen-lock settings.")
+        active = str(values.get("ScreenSaveActive", "")).strip() == "1"
+        secure = str(values.get("ScreenSaverIsSecure", "")).strip() == "1"
+        timeout = _as_int(values.get("ScreenSaveTimeOut"))
+        minutes = (timeout or 0) // 60
+        if not active or not secure:
+            return self.result(
+                CheckStatus.FAIL,
+                "The screen does not lock itself: anyone walking past can use this computer.")
+        if minutes > self.MAX_MINUTES:
+            return self.result(
+                CheckStatus.WARN,
+                f"The screen only locks after {minutes} minutes.",
+                severity=Severity.LOW)
+        return self.result(CheckStatus.PASS,
+                           f"The screen locks after {minutes or 1} minute(s) of inactivity.")
+
+
 def default_checks() -> list[PostureCheck]:
     return [
         FirewallEnabledCheck(),
@@ -713,4 +895,8 @@ def default_checks() -> list[PostureCheck]:
         DiskEncryptionCheck(),
         SSHHardeningCheck(),
         SensitiveFilePermissionsCheck(),
+        PasswordPolicyCheck(),
+        GuestAccountCheck(),
+        RiskyServicesCheck(),
+        ScreenLockCheck(),
     ]

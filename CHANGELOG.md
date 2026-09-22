@@ -15,6 +15,12 @@ All notable changes to Aegis are documented here. The format is based on
 - DNS telemetry, so threat intel can match malicious domains as well as IPs.
 
 ### Added
+- **Four more security checks**, each with the same plain-language fix advice:
+  password policy (length and lockout, on Windows and Linux), the Windows guest
+  account, risky Windows services (cleartext ones fail; Remote Registry, ICS and
+  WinRM warn), and whether the screen locks itself when the computer is left
+  alone. Three come with one-click fixes, and the screen-lock fix needs no
+  administrator rights because it changes the signed-in user's own setting.
 - **Containment on this computer**: `aegis stop <pid>` and a *Stop* button on
   alerts and in Running Programs close a suspicious program (operating-system
   processes and Aegis itself are refused, and the process name must still match

@@ -54,16 +54,16 @@ class Machine:
         return RunResult(code, text.encode())
 
     # writers
-    def write_registry(self, key, name, value, kind):
+    def write_registry(self, hive, key, name, value, kind):
         self._writes += 1
         if self._writes == self.fail_write_number:
             raise HardeningError("access denied")
         if self.ignore_writes:
             return
         if value is None:
-            self.registry.pop((key, name), None)
+            self.registry.pop((hive, key, name), None)
         else:
-            self.registry[(key, name)] = int(value) if kind == "dword" else str(value)
+            self.registry[(hive, key, name)] = int(value) if kind == "dword" else str(value)
 
     def write_text(self, path, text):
         self.files[path] = text
@@ -76,8 +76,10 @@ class Machine:
             os=self.os, elevated=self.elevated, runner=self.run,
             listeners=lambda: list(self.listening),
             read_text=self.files.get, stat_mode=self.modes.get,
-            read_registry=lambda key, name: self.registry.get((key, name)),
-            registry_values=lambda hive, key: None, glob=lambda pattern: [],
+            read_registry=lambda key, name: self.registry.get(("HKLM", key, name)),
+            registry_values=lambda hive, key: {
+                name: value for (h, k, name), value in self.registry.items()
+                if (h, k) == (hive, key)}, glob=lambda pattern: [],
             env=lambda name: None,
             write_registry=self.write_registry, write_text=self.write_text, chmod=self.chmod)
 
@@ -98,11 +100,11 @@ def engine_for(machine, store):
 # --------------------------------------------------------------------------- #
 def test_fix_is_applied_verified_recorded_and_audited(store):
     m = Machine()
-    m.registry[(SMB, "SMB1")] = 1
+    m.registry[("HKLM", SMB, "SMB1")] = 1
     result = engine_for(m, store).apply("FIX-WIN-SMB1", confirmed=True)
 
     assert result.outcome is Outcome.FIXED and result.ok
-    assert m.registry[(SMB, "SMB1")] == 0
+    assert m.registry[("HKLM", SMB, "SMB1")] == 0
     assert result.check_status == "pass"
     assert "Restart" in result.message
     record = store.remediation(result.record_id)
@@ -114,19 +116,19 @@ def test_fix_is_applied_verified_recorded_and_audited(store):
 
 def test_nothing_changes_without_confirmation(store):
     m = Machine()
-    m.registry[(SMB, "SMB1")] = 1
+    m.registry[("HKLM", SMB, "SMB1")] = 1
     result = engine_for(m, store).apply("FIX-WIN-SMB1")
     assert result.outcome is Outcome.NEEDS_CONFIRMATION
-    assert result.changes and m.registry[(SMB, "SMB1")] == 1
+    assert result.changes and m.registry[("HKLM", SMB, "SMB1")] == 1
     assert store.recent_remediations() == []
 
 
 def test_changes_needing_admin_are_refused_up_front(store):
     m = Machine(elevated=False)
-    m.registry[(SMB, "SMB1")] = 1
+    m.registry[("HKLM", SMB, "SMB1")] = 1
     result = engine_for(m, store).apply("FIX-WIN-SMB1", confirmed=True)
     assert result.outcome is Outcome.NEEDS_ADMIN
-    assert m.registry[(SMB, "SMB1")] == 1
+    assert m.registry[("HKLM", SMB, "SMB1")] == 1
     assert store.recent_remediations()[0].status == "needs_admin"
 
 
@@ -140,20 +142,20 @@ def test_safe_settings_need_nothing(store):
 
 def test_a_failure_part_way_is_rolled_back(store):
     m = Machine()
-    m.registry[(UAC, "EnableLUA")] = 0
-    m.registry[(UAC, "ConsentPromptBehaviorAdmin")] = 0
+    m.registry[("HKLM", UAC, "EnableLUA")] = 0
+    m.registry[("HKLM", UAC, "ConsentPromptBehaviorAdmin")] = 0
     m.fail_write_number = 2       # the first value is written, the second fails
     result = engine_for(m, store).apply("FIX-WIN-UAC", confirmed=True)
     assert result.outcome is Outcome.FAILED
     assert "restored" in result.message
-    assert (m.registry[(UAC, "EnableLUA")], m.registry[(UAC, "ConsentPromptBehaviorAdmin")]) \
+    assert (m.registry[("HKLM", UAC, "EnableLUA")], m.registry[("HKLM", UAC, "ConsentPromptBehaviorAdmin")]) \
         == (0, 0)
     assert not store.remediation(result.record_id).can_undo
 
 
 def test_a_change_that_does_not_stick_is_reported_not_verified(store):
     m = Machine()
-    m.registry[(SMB, "SMB1")] = 1
+    m.registry[("HKLM", SMB, "SMB1")] = 1
     m.ignore_writes = True
     result = engine_for(m, store).apply("FIX-WIN-SMB1", confirmed=True)
     assert result.outcome is Outcome.NOT_VERIFIED and not result.ok
@@ -163,18 +165,18 @@ def test_a_change_that_does_not_stick_is_reported_not_verified(store):
 
 def test_undo_restores_the_backup_once(store):
     m = Machine()
-    m.registry[(RDP, "UserAuthentication")] = 0
+    m.registry[("HKLM", RDP, "UserAuthentication")] = 0
     engine = engine_for(m, store)
     applied = engine.apply("FIX-WIN-RDP-NLA", confirmed=True)
-    assert m.registry[(RDP, "UserAuthentication")] == 1
+    assert m.registry[("HKLM", RDP, "UserAuthentication")] == 1
 
     asked = engine.undo(applied.record_id)
     assert asked.outcome is Outcome.NEEDS_CONFIRMATION
-    assert m.registry[(RDP, "UserAuthentication")] == 1
+    assert m.registry[("HKLM", RDP, "UserAuthentication")] == 1
 
     undone = engine.undo(applied.record_id, confirmed=True)
     assert undone.outcome is Outcome.UNDONE
-    assert m.registry[(RDP, "UserAuthentication")] == 0
+    assert m.registry[("HKLM", RDP, "UserAuthentication")] == 0
     assert store.remediation(applied.record_id).undone_at is not None
     assert store.remediation(undone.record_id).undo_of == applied.record_id
     assert engine.undo(applied.record_id, confirmed=True).outcome is Outcome.FAILED
@@ -182,12 +184,12 @@ def test_undo_restores_the_backup_once(store):
 
 def test_undo_also_needs_admin(store):
     m = Machine()
-    m.registry[(SMB, "SMB1")] = 1
+    m.registry[("HKLM", SMB, "SMB1")] = 1
     engine = engine_for(m, store)
     applied = engine.apply("FIX-WIN-SMB1", confirmed=True)
     engine.ctx.elevated = False
     assert engine.undo(applied.record_id, confirmed=True).outcome is Outcome.NEEDS_ADMIN
-    assert m.registry[(SMB, "SMB1")] == 0
+    assert m.registry[("HKLM", SMB, "SMB1")] == 0
 
 
 def test_unknown_fixes_and_records_are_rejected(store):
@@ -207,9 +209,9 @@ def test_fixes_for_other_platforms_are_not_offered(store):
 
 def test_recommendations_pair_weak_checks_with_fixes_and_guidance(store):
     m = Machine()
-    m.registry[(SMB, "SMB1")] = 1
-    m.registry[(TS, "fDenyTSConnections")] = 0
-    m.registry[(RDP, "UserAuthentication")] = 0
+    m.registry[("HKLM", SMB, "SMB1")] = 1
+    m.registry[("HKLM", TS, "fDenyTSConnections")] = 0
+    m.registry[("HKLM", RDP, "UserAuthentication")] = 0
     m.listening = [Listener("0.0.0.0", 3389, "svchost.exe")]
     engine = engine_for(m, store)
     report = run_posture_checks(engine.ctx)
@@ -227,16 +229,16 @@ def test_recommendations_pair_weak_checks_with_fixes_and_guidance(store):
 # --------------------------------------------------------------------------- #
 def test_autologon_fix_never_reads_out_or_keeps_the_password(store):
     m = Machine()
-    m.registry[(WINLOGON, "AutoAdminLogon")] = "1"
-    m.registry[(WINLOGON, "DefaultPassword")] = PASSWORD
+    m.registry[("HKLM", WINLOGON, "AutoAdminLogon")] = "1"
+    m.registry[("HKLM", WINLOGON, "DefaultPassword")] = PASSWORD
     engine = engine_for(m, store)
 
     preview = engine.preview("FIX-WIN-AUTOLOGON")
     assert PASSWORD not in json.dumps(preview.to_dict())
     result = engine.apply("FIX-WIN-AUTOLOGON", confirmed=True)
     assert result.outcome is Outcome.FIXED
-    assert m.registry[(WINLOGON, "AutoAdminLogon")] == "0"
-    assert (WINLOGON, "DefaultPassword") not in m.registry
+    assert m.registry[("HKLM", WINLOGON, "AutoAdminLogon")] == "0"
+    assert ("HKLM", WINLOGON, "DefaultPassword") not in m.registry
 
     record = store.remediation(result.record_id)
     stored = json.dumps([record.changes, record.backup, record.message,
@@ -245,13 +247,13 @@ def test_autologon_fix_never_reads_out_or_keeps_the_password(store):
 
     undone = engine.undo(result.record_id, confirmed=True)
     assert "cannot be restored" in undone.message
-    assert m.registry[(WINLOGON, "AutoAdminLogon")] == "1"
-    assert (WINLOGON, "DefaultPassword") not in m.registry
+    assert m.registry[("HKLM", WINLOGON, "AutoAdminLogon")] == "1"
+    assert ("HKLM", WINLOGON, "DefaultPassword") not in m.registry
 
 
 def test_autologon_fix_has_nothing_to_do_while_autologon_is_off(store):
     m = Machine()
-    m.registry[(WINLOGON, "AutoAdminLogon")] = "0"
+    m.registry[("HKLM", WINLOGON, "AutoAdminLogon")] = "0"
     assert engine_for(m, store).preview("FIX-WIN-AUTOLOGON").outcome is Outcome.NOTHING_TO_DO
 
 
@@ -480,7 +482,7 @@ def test_remediation_history_round_trips(store):
 @pytest.fixture
 def cli_machine(tmp_path, monkeypatch):
     m = Machine()
-    m.registry[(SMB, "SMB1")] = 1
+    m.registry[("HKLM", SMB, "SMB1")] = 1
     monkeypatch.setattr(cli, "_hardening_engine", lambda: HardeningEngine(
         SQLiteEventStore(tmp_path / "cli.db"), ctx=m.context()))
     return m
@@ -490,19 +492,19 @@ def test_cli_dry_run_changes_nothing(cli_machine, capsys):
     assert cli.main(["harden", "apply", "FIX-WIN-SMB1", "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert "SMB1: 1 -> 0" in out and "nothing was changed" in out
-    assert cli_machine.registry[(SMB, "SMB1")] == 1
+    assert cli_machine.registry[("HKLM", SMB, "SMB1")] == 1
 
 
 def test_cli_refuses_without_confirmation_when_it_cannot_ask(cli_machine, capsys, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     assert cli.main(["harden", "apply", "FIX-WIN-SMB1"]) == 1
-    assert cli_machine.registry[(SMB, "SMB1")] == 1
+    assert cli_machine.registry[("HKLM", SMB, "SMB1")] == 1
     assert "--yes" in capsys.readouterr().err
 
 
 def test_cli_apply_history_and_undo(cli_machine, capsys):
     assert cli.main(["harden", "apply", "FIX-WIN-SMB1", "--yes"]) == 0
-    assert cli_machine.registry[(SMB, "SMB1")] == 0
+    assert cli_machine.registry[("HKLM", SMB, "SMB1")] == 0
     assert "FIXED" in capsys.readouterr().out
 
     assert cli.main(["harden", "history", "--json"]) == 0
@@ -510,7 +512,7 @@ def test_cli_apply_history_and_undo(cli_machine, capsys):
     assert history[0]["fix_id"] == "FIX-WIN-SMB1" and history[0]["can_undo"]
 
     assert cli.main(["harden", "undo", str(history[0]["id"]), "--yes"]) == 0
-    assert cli_machine.registry[(SMB, "SMB1")] == 1
+    assert cli_machine.registry[("HKLM", SMB, "SMB1")] == 1
 
 
 def test_cli_lists_fixes_for_weak_checks(cli_machine, capsys):

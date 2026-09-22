@@ -77,7 +77,7 @@ Score 81/100 (grade B): 1 failed, 1 warnings, 6 passed, 0 skipped
 
 | Area | What it does |
 |------|--------------|
-| ✅ **Security posture audit** | `aegis check`: 12 read-only checks (firewall, exposed services, OS updates, suspicious startup programs, antivirus, UAC, RDP/NLA, SMBv1, auto-logon, disk encryption, SSH hardening, file permissions), scored 0-100 with a fix for each failure |
+| ✅ **Security posture audit** | `aegis check`: 16 read-only checks (firewall, exposed services, OS updates, suspicious startup programs, antivirus, UAC, RDP/NLA, SMBv1, auto-logon, disk encryption, SSH hardening, file permissions, password policy, guest account, risky services, screen lock), scored 0-100 with a fix for each failure |
 | 🛠️ **Safe hardening** | `aegis harden` and a **Fix** button on the Security Check page: explains the risk, shows exactly what will change, asks first, saves the old settings, applies, verifies and records the fix, with **Undo** |
 | 🔑 **Sign-in monitoring** | Reads the computer's own security log: password guessing and spraying, a success straight after failures, new accounts, accounts given administrator rights, lockouts |
 | 🔔 **Setting-change alerts** | Re-checks security settings on a timer and alerts when something that was safe (firewall, antivirus, UAC) is turned off again |
@@ -181,6 +181,9 @@ Every fix goes through the same steps, enforced in one place
 | `FIX-WIN-RDP-OFF` | Windows | Turns Remote Desktop off |
 | `FIX-WIN-UAC` | Windows | Restores User Account Control to the default level |
 | `FIX-WIN-AUTOLOGON` | Windows | Turns off automatic sign-in and deletes the plaintext password (never read or kept by Aegis, so undo cannot restore it) |
+| `FIX-WIN-PASSWORD-POLICY` | Windows | Requires 12-character passwords and locks an account after 5 wrong ones |
+| `FIX-WIN-GUEST` | Windows | Turns off the guest account |
+| `FIX-WIN-SCREEN-LOCK` | Windows | Locks the screen after 10 idle minutes (no admin rights needed: it is your own setting) |
 | `FIX-MAC-FIREWALL` | macOS | Turns the application firewall on |
 | `FIX-LINUX-UFW` | Linux | Enables ufw, allowing SSH first if an SSH server is running |
 | `FIX-SSH-LOGIN` | Linux, macOS | Stops root and empty-password SSH logins; validated with `sshd -t` and rolled back if rejected |

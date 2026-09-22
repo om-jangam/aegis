@@ -21,11 +21,15 @@ from aegis.platforms import OS
 from aegis.posture.base import PostureContext
 from aegis.posture.checks import (
     AutoLogonCheck,
+    GuestAccountCheck,
+    PasswordPolicyCheck,
     RemoteDesktopCheck,
+    ScreenLockCheck,
     SensitiveFilePermissionsCheck,
     SMBv1Check,
     SSHHardeningCheck,
     UserAccountControlCheck,
+    _as_int,
     sshd_options,
 )
 
@@ -250,6 +254,125 @@ class AutoLogonFix(RegistryFix):
         return super().plan(ctx)
 
 
+class ScreenLockFix(RegistryFix):
+    fix_id = "FIX-WIN-SCREEN-LOCK"
+    check_id = ScreenLockCheck.check_id
+    title = "Lock the screen after 10 minutes of inactivity"
+    risk = ("A computer left unlocked can be used by anyone who walks past: your files, "
+            "your mail and your saved passwords, with no password needed.")
+    effect = ("After 10 idle minutes the screen saver starts and you have to sign in "
+              "again. Nothing you are running is interrupted.")
+    requires_admin = False          # these are this user's own settings
+    VALUES = (
+        RegistryValue(ScreenLockCheck._DESKTOP, "ScreenSaveActive", "1", kind="sz",
+                      hive="HKCU"),
+        RegistryValue(ScreenLockCheck._DESKTOP, "ScreenSaverIsSecure", "1", kind="sz",
+                      hive="HKCU"),
+        RegistryValue(ScreenLockCheck._DESKTOP, "ScreenSaveTimeOut", "600", kind="sz",
+                      hive="HKCU"),
+    )
+
+
+class GuestAccountFix(Fix):
+    fix_id = "FIX-WIN-GUEST"
+    check_id = GuestAccountCheck.check_id
+    title = "Turn off the guest account"
+    risk = ("The guest account lets anyone sign in to this computer without a password, "
+            "and everything they do looks like 'Guest' rather than a person.")
+    effect = "Nobody can sign in as Guest. Your own accounts are untouched."
+    platforms = (OS.WINDOWS,)
+
+    @staticmethod
+    def _active(ctx: HardeningContext) -> bool | None:
+        out = ctx.run(["net", "user", "Guest"])
+        if out is None or out[0] != 0:
+            return None
+        match = re.search(r"Account active\s+(\S+)", out[1])
+        return match.group(1).strip().lower() in ("yes", "ja", "oui", "si") if match else None
+
+    def plan(self, ctx: HardeningContext) -> list[Change]:
+        active = self._active(ctx)
+        if active is None:
+            raise HardeningError("Could not read whether the guest account is on.")
+        return [Change("Guest account", "on", "off")] if active else []
+
+    def snapshot(self, ctx: HardeningContext) -> dict:
+        return {"was_active": bool(self._active(ctx))}
+
+    def apply(self, ctx: HardeningContext) -> str:
+        ctx.must_run(["net", "user", "Guest", "/active:no"], "turn the guest account off")
+        return ""
+
+    def restore(self, ctx: HardeningContext, backup: dict) -> str:
+        if backup.get("was_active"):
+            ctx.must_run(["net", "user", "Guest", "/active:yes"],
+                         "turn the guest account back on")
+        return ""
+
+
+class PasswordPolicyFix(Fix):
+    fix_id = "FIX-WIN-PASSWORD-POLICY"
+    check_id = PasswordPolicyCheck.check_id
+    title = "Require longer passwords and lock the account after 5 wrong ones"
+    risk = ("Short passwords are guessed in minutes, and without a lockout an attacker "
+            "can keep trying forever over Remote Desktop or file sharing.")
+    effect = ("New passwords must be at least 12 characters. Existing passwords keep "
+              "working until they are changed. After 5 wrong passwords an account is "
+              "locked for 15 minutes, including yours, so take care typing.")
+    platforms = (OS.WINDOWS,)
+    MIN_LENGTH = 12
+    LOCKOUT = 5
+    LOCKOUT_MINUTES = 15
+
+    @staticmethod
+    def _policy(ctx: HardeningContext) -> tuple[int | None, int | None]:
+        out = ctx.run(["net", "accounts"])
+        if out is None or out[0] != 0:
+            raise HardeningError("Could not read the password policy.")
+        length = re.search(r"Minimum password length[^:]*:\s*(\S+)", out[1])
+        lockout = re.search(r"Lockout threshold[^:]*:\s*(\S+)", out[1])
+        def number(match):
+            if match is None:
+                return None
+            value = match.group(1).strip()
+            return 0 if value.lower() == "never" else _as_int(value)
+        return number(length), number(lockout)
+
+    def plan(self, ctx: HardeningContext) -> list[Change]:
+        length, lockout = self._policy(ctx)
+        changes = []
+        if length is not None and length < self.MIN_LENGTH:
+            changes.append(Change("Shortest allowed password", f"{length} characters",
+                                  f"{self.MIN_LENGTH} characters"))
+        if lockout is not None and (lockout == 0 or lockout > self.LOCKOUT):
+            changes.append(Change("Account locks after",
+                                  "never" if lockout == 0 else f"{lockout} wrong passwords",
+                                  f"{self.LOCKOUT} wrong passwords"))
+        return changes
+
+    def snapshot(self, ctx: HardeningContext) -> dict:
+        length, lockout = self._policy(ctx)
+        return {"length": length, "lockout": lockout}
+
+    def apply(self, ctx: HardeningContext) -> str:
+        ctx.must_run(["net", "accounts", f"/minpwlen:{self.MIN_LENGTH}",
+                      f"/lockoutthreshold:{self.LOCKOUT}",
+                      f"/lockoutduration:{self.LOCKOUT_MINUTES}",
+                      f"/lockoutwindow:{self.LOCKOUT_MINUTES}"],
+                     "change the password policy")
+        return ""
+
+    def restore(self, ctx: HardeningContext, backup: dict) -> str:
+        args = ["net", "accounts"]
+        if backup.get("length") is not None:
+            args.append(f"/minpwlen:{backup['length']}")
+        if backup.get("lockout") is not None:
+            args.append(f"/lockoutthreshold:{backup['lockout']}")
+        if len(args) > 2:
+            ctx.must_run(args, "put the previous password policy back")
+        return ""
+
+
 # --------------------------------------------------------------------------- #
 # SSH server
 # --------------------------------------------------------------------------- #
@@ -378,6 +501,7 @@ def default_fixes() -> list[Fix]:
     return [
         WindowsFirewallFix(), MacFirewallFix(), UfwFirewallFix(),
         SMBv1ServerFix(), RemoteDesktopNlaFix(), RemoteDesktopOffFix(),
-        UserAccountControlFix(), AutoLogonFix(),
+        UserAccountControlFix(), AutoLogonFix(), ScreenLockFix(), GuestAccountFix(),
+        PasswordPolicyFix(),
         SSHLoginFix(), FilePermissionsFix(),
     ]
