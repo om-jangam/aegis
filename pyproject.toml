@@ -47,11 +47,31 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.6",
+    "mypy>=1.11",
     "flet==0.86.*",
 ]
 
 [project.scripts]
 aegis = "aegis.cli:main"
+
+[tool.mypy]
+# 3.12 because numpy's bundled stubs use 3.12 syntax that mypy cannot parse
+# under an older target. Ruff still holds the code to the 3.11 this project
+# supports, and CI runs the tests on 3.11.
+python_version = "3.12"
+files = ["aegis"]
+# Type checking is here to catch real mistakes (an unhandled None, a wrong
+# argument), not to force annotations on to every helper, so untyped function
+# bodies stay unchecked and third-party packages that ship no type information
+# are taken at their word.
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["psutil.*", "yaml.*", "win11toast.*", "sklearn.*", "joblib.*"]
+ignore_missing_imports = true
+
 
 [tool.setuptools.packages.find]
 include = ["aegis*"]

@@ -8,6 +8,7 @@ import flet as ft
 from aegis.config import settings
 from aegis.intel import get_intel, intel_dir, reset_cache
 from aegis.posture import CheckStatus, run_posture_checks
+from aegis.posture.base import PostureReport
 from aegis.ui import components as c
 from aegis.ui import theme
 from aegis.ui.views.base import BaseView
@@ -36,7 +37,7 @@ class SecurityCheckView(BaseView):
     icon = ft.Icons.HEALTH_AND_SAFETY_OUTLINED
 
     def build(self) -> ft.Control:
-        self._report = None
+        self._report: PostureReport | None = None
         self._fixes: dict[str, list] = {}
         self._checking = False
         self._fixing = False

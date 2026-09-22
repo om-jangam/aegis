@@ -46,6 +46,12 @@ jobs:
       - name: Lint (ruff)
         run: ruff check aegis tests evaluation packaging
 
+      - name: Type check (mypy)
+        # numpy ships 3.12-only stub syntax, so the type check runs on the
+        # newest supported Python; the tests still run on every version.
+        if: matrix.python-version == '3.13'
+        run: mypy
+
       - name: Run tests
         # Keep test state out of the real user profile on every runner.
         env:

@@ -6,7 +6,7 @@ import flet as ft
 
 class BaseView:
     title: str = "View"
-    icon: str = ft.Icons.CIRCLE
+    icon: ft.IconData = ft.Icons.CIRCLE
 
     def __init__(self, app):
         self.app = app

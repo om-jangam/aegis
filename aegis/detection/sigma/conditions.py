@@ -30,10 +30,19 @@ from __future__ import annotations
 import fnmatch
 import re
 from dataclasses import dataclass
+from typing import Protocol
 
 _TOKEN_RE = re.compile(r"\(|\)|\||[\w*]+")
 _KEYWORDS = {"and", "or", "not", "of"}
 _QUANTIFIERS = {"1", "any", "all"}
+
+
+class Condition(Protocol):
+    """Anything in a parsed condition tree: an identifier, or a combination of them."""
+
+    def evaluate(self, matches: dict[str, bool]) -> bool: ...
+
+    def identifiers(self) -> set[str]: ...
 
 
 class SigmaConditionError(ValueError):
@@ -58,7 +67,7 @@ class Identifier:
 
 @dataclass(frozen=True)
 class Not:
-    operand: object
+    operand: Condition
 
     def evaluate(self, matches: dict[str, bool]) -> bool:
         return not self.operand.evaluate(matches)

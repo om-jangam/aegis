@@ -205,7 +205,8 @@ def to_shared_event(item: Finding | Alert | PostureReport | Heartbeat, agent: Ag
     if response_taken not in RESPONSES:
         raise ValueError(f"unknown response_taken {response_taken!r}")
 
-    audit = None
+    audit: dict | None = None
+    severity: Severity | str
     if isinstance(item, Finding):
         event_type = "finding"
         severity = item.severity
@@ -231,10 +232,11 @@ def to_shared_event(item: Finding | Alert | PostureReport | Heartbeat, agent: Ag
         severity = _audit_severity(item)
         rule = {"id": "AEGIS-SECURITY-CHECK", "name": "Security check", "source": "python"}
         mitre = []
-        audit = _audit(item)
+        audit = _audit(item) or {}
         message = (f"Security check score {audit['score']}/100 (grade {audit['grade']}): "
                    f"{audit['failed']} failed, {audit['warnings']} warnings."
-                   if audit["score"] is not None else "The security check could not evaluate this host.")
+                   if audit.get("score") is not None
+                   else "The security check could not evaluate this host.")
         timestamp = item.generated_at
     elif isinstance(item, Heartbeat):
         event_type = "heartbeat"

@@ -182,7 +182,7 @@ class SQLiteEventStore(EventStore):
                  finding.source_summary),
             )
             self._conn.commit()
-            return cur.lastrowid
+            return int(cur.lastrowid or 0)
 
     def recent_findings(self, limit: int = 200) -> list[dict]:
         with self._lock:
@@ -202,7 +202,7 @@ class SQLiteEventStore(EventStore):
                  int(alert.acknowledged), alert.process_name, alert.parent_name),
             )
             self._conn.commit()
-            return cur.lastrowid
+            return int(cur.lastrowid or 0)
 
     def recent_alerts(self, limit: int = 100, unacknowledged_only: bool = False) -> list[Alert]:
         sql = "SELECT * FROM alerts"
@@ -233,7 +233,7 @@ class SQLiteEventStore(EventStore):
                  event.severity.value, event.message, event.detail, event.actor),
             )
             self._conn.commit()
-            return cur.lastrowid
+            return int(cur.lastrowid or 0)
 
     def recent_audit(self, limit: int = 200, category: str | None = None) -> list[AuditEvent]:
         sql = "SELECT * FROM audit"
@@ -258,7 +258,7 @@ class SQLiteEventStore(EventStore):
                  json.dumps(rec.backup), rec.undo_of),
             )
             self._conn.commit()
-            return cur.lastrowid
+            return int(cur.lastrowid or 0)
 
     def remediation(self, remediation_id: int) -> Remediation | None:
         with self._lock:

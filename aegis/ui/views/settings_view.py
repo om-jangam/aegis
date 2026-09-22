@@ -140,7 +140,7 @@ class SettingsView(BaseView):
         settings.anomaly_detection_enabled = self.anomaly.value
         settings.auth_monitoring_enabled = self.auth.value
         settings.desktop_notifications = self.notifications.value
-        settings.threat_score_alert_threshold = int(self.threshold.value)
+        settings.threat_score_alert_threshold = int(self.threshold.value or 70)
         settings.network_poll_interval = interval
         settings.space_background = self.space.value
         settings.save()

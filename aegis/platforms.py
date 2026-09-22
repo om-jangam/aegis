@@ -64,13 +64,11 @@ def is_elevated() -> bool:
         try:
             import ctypes
 
-            return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
         except Exception:  # noqa: BLE001 - restricted or non-Windows environment
             return False
-    try:
-        return os.geteuid() == 0
-    except AttributeError:  # pragma: no cover - geteuid missing off POSIX
-        return False
+    geteuid = getattr(os, "geteuid", None)      # POSIX only
+    return geteuid() == 0 if geteuid is not None else False
 
 
 def privilege_hint() -> str:

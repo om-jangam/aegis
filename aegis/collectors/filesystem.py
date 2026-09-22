@@ -233,7 +233,7 @@ class FileIntegrityCollector(Collector):
             unchanged = (known is not None
                          and known.get("size") == size
                          and known.get("mtime") == mtime)
-            if unchanged:
+            if unchanged and known is not None:
                 current[key] = known
                 continue
 

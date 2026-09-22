@@ -16,6 +16,7 @@ from aegis.forwarding.agent import AgentInfo
 from aegis.forwarding.queue import EventQueue
 from aegis.forwarding.schema import Heartbeat, to_shared_event
 from aegis.forwarding.sender import Backoff, Sender
+from aegis.posture.base import PostureReport
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class Forwarder:
     def __init__(self, sender: Sender, queue: EventQueue, agent: AgentInfo, *,
                  batch_size: int = 50, flush_interval: float = 10.0,
                  heartbeat_interval: float = HEARTBEAT_SECONDS,
-                 posture_provider: Callable[[], object] | None = None,
+                 posture_provider: Callable[[], PostureReport | None] | None = None,
                  backoff: Backoff | None = None):
         self.sender = sender
         self.queue = queue

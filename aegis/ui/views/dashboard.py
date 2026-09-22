@@ -157,7 +157,7 @@ class DashboardView(BaseView):
 
     def _show_status(self, status) -> None:
         icon, color = _STATUS_STYLE[status.level]
-        self.status_icon.name = icon
+        self.status_icon.icon = icon
         self.status_icon.color = color
         self.status_card.bgcolor = ft.Colors.with_opacity(0.08, color)
         self.status_card.border = ft.Border.all(1, ft.Colors.with_opacity(0.55, color))

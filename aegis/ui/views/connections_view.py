@@ -52,6 +52,7 @@ class ConnectionsView(BaseView):
         self.safe_update()
 
     def _row(self, r: dict) -> ft.Control:
+        block: ft.Control
         if r["remote_ip"]:
             where = f"{r['remote_ip']}  port {r['remote_port']}"
             admin = is_admin()

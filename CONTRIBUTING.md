@@ -8,13 +8,14 @@ detection rules, collectors, and fixes are welcome.
 ```bash
 python -m venv .venv
 .venv\Scripts\activate        # Windows
-pip install -e ".[dev]"        # installs the package + pytest, ruff
+pip install -e ".[dev]"        # installs the package + pytest, ruff, mypy
 ```
 
 ## Before you push
 
 ```bash
 ruff check aegis tests evaluation packaging   # lint (must be clean)
+mypy                                   # types (must be clean)
 pytest --cov=aegis                     # tests (must pass)
 ```
 

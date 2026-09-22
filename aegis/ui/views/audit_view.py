@@ -38,7 +38,7 @@ class AuditView(BaseView):
 
     def _row(self, ev) -> ft.Control:
         color = theme.SEVERITY_COLOR.get(ev.severity, theme.INFO)
-        text = [ft.Text(ev.message, size=12, color=theme.TEXT, no_wrap=True,
+        text: list[ft.Control] = [ft.Text(ev.message, size=12, color=theme.TEXT, no_wrap=True,
                         overflow=ft.TextOverflow.ELLIPSIS)]
         if ev.detail:
             text.append(ft.Text(ev.detail, size=11, color=theme.TEXT_MUTED, no_wrap=True,

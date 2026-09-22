@@ -45,6 +45,9 @@ class AegisApp:
         self.active_index = 0
         self.content_host = ft.Container(expand=True, padding=24, content=self.views[0].control)
         self._nav_buttons: list[ft.Container] = []
+        #: The icon and text inside each sidebar button, so navigation can
+        #: recolour them without digging through the control tree.
+        self._nav_labels: list[tuple[ft.Icon, ft.Text]] = []
         self.monitor_btn = ft.FilledButton("Start monitoring", icon=ft.Icons.PLAY_ARROW)
 
         self.sky = SpaceBackground(visible=settings.space_background,
@@ -82,13 +85,15 @@ class AegisApp:
     def _sidebar(self) -> ft.Control:
         nav = ft.Column(spacing=6)
         for i, view in enumerate(self.views):
+            icon = ft.Icon(view.icon, size=20, color=theme.TEXT_MUTED)
+            label = ft.Text(view.title, size=14, color=theme.TEXT_MUTED,
+                            weight=ft.FontWeight.W_600)
             btn = ft.Container(
-                content=ft.Row([ft.Icon(view.icon, size=20, color=theme.TEXT_MUTED),
-                                ft.Text(view.title, size=14, color=theme.TEXT_MUTED,
-                                        weight=ft.FontWeight.W_600)], spacing=12),
+                content=ft.Row([icon, label], spacing=12),
                 padding=ft.Padding.symmetric(horizontal=14, vertical=11), border_radius=10,
                 ink=True, on_click=lambda e, idx=i: self.navigate(idx))
             self._nav_buttons.append(btn)
+            self._nav_labels.append((icon, label))
             nav.controls.append(btn)
         brand = ft.Row([ft.Icon(ft.Icons.SHIELD_MOON, color=theme.PRIMARY, size=30),
                         ft.Column([ft.Text(__app_name__, size=20, weight=ft.FontWeight.BOLD,
@@ -126,11 +131,12 @@ class AegisApp:
         view = self.views[index]
         self.content_host.content = view.control
         self.title_text.value = view.title
-        for i, btn in enumerate(self._nav_buttons):
+        for i, (btn, (icon, label)) in enumerate(zip(self._nav_buttons, self._nav_labels,
+                                                     strict=True)):
             active = i == index
             btn.bgcolor = theme.SURFACE_ALT if active else None
-            btn.content.controls[0].color = theme.PRIMARY if active else theme.TEXT_MUTED
-            btn.content.controls[1].color = theme.TEXT if active else theme.TEXT_MUTED
+            icon.color = theme.PRIMARY if active else theme.TEXT_MUTED
+            label.color = theme.TEXT if active else theme.TEXT_MUTED
         try:
             view.refresh()
         except Exception:  # noqa: BLE001

@@ -21,13 +21,14 @@ from aegis.forwarding.sender import (
     https_transport,
     validate_server_url,
 )
+from aegis.posture.base import PostureReport
 
 API_KEY_ENV = "AEGIS_FORWARDING_API_KEY"
 QUEUE_FILE = "forward_queue.db"
 
 
 def build_forwarder(config, data_dir: Path | str, *, api_key: str | None = None,
-                    posture_provider: Callable[[], object] | None = None,
+                    posture_provider: Callable[[], PostureReport | None] | None = None,
                     transport: Transport = https_transport) -> Forwarder | None:
     """A ready (not yet started) forwarder, or None when forwarding is disabled.
 

@@ -147,6 +147,11 @@ def cmd_status(args) -> int:
         queue = EventQueue(DATA_DIR / QUEUE_FILE)
         queued = len(queue)
         queue.close()
+    forwarding = {
+        "enabled": settings.forwarding.enabled,
+        "server_url": settings.forwarding.server_url,
+        "queued_events": queued,
+    }
     info = {
         "version": __version__,
         "platform": CURRENT_OS.value,
@@ -157,17 +162,12 @@ def cmd_status(args) -> int:
         "notifications": notification_backend(),
         "detection_rules": DetectionEngine().rule_count,
         "data_dir": str(DATA_DIR),
-        "forwarding": {
-            "enabled": settings.forwarding.enabled,
-            "server_url": settings.forwarding.server_url,
-            "queued_events": queued,
-        },
+        "forwarding": forwarding,
     }
     if args.json:
         print(json.dumps(info, indent=2))
         return 0
 
-    forwarding = info["forwarding"]
     forwarding_text = f"on -> {forwarding['server_url']}" if forwarding["enabled"] else "off"
     if queued:
         forwarding_text += f" ({queued} event(s) queued)"

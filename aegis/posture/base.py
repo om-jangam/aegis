@@ -19,6 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from aegis.core.models import Severity
 from aegis.platforms import CURRENT_OS, OS, is_elevated
@@ -105,7 +106,7 @@ def listening_sockets() -> list[Listener]:
     """Enumerate TCP listening sockets with their owning process."""
     import psutil
 
-    pairs: list[tuple[int | None, object]] = []
+    pairs: list[tuple[int | None, Any]] = []
     try:
         pairs = [(c.pid, c) for c in psutil.net_connections(kind="inet")]
     except (psutil.AccessDenied, PermissionError):
