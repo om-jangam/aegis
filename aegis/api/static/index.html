@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aegis dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%232563eb' d='M12 1 3 5v6c0 5 3.8 9.7 9 12 5.2-2.3 9-7 9-12V5z'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
@@ -51,6 +52,16 @@
       <div class="table-wrap"><table>
         <thead><tr><th>Severity</th><th>Detection</th><th>Subject</th><th>What to do</th><th>When</th></tr></thead>
         <tbody id="findings"></tbody>
+      </table></div>
+    </section>
+
+    <section class="card">
+      <h2>Hardening history</h2>
+      <p class="muted small">Fixes applied on this computer, newest first. Apply and undo
+        fixes in the Aegis app or with <code>aegis harden</code>; this page only shows them.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>When</th><th>Result</th><th>Fix</th><th>What changed</th></tr></thead>
+        <tbody id="hardening"></tbody>
       </table></div>
     </section>
 

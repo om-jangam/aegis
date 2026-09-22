@@ -169,3 +169,22 @@ def test_real_http_round_trip_sets_security_headers(store):
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_hardening_history_is_listed_read_only(app, store):
+    from aegis.core.models import Remediation
+
+    store.save_remediation(Remediation(
+        fix_id="FIX-WIN-SMB1", check_id="POSTURE-SMB1", title="Turn off SMBv1",
+        action="apply", status="fixed", message="Fixed and verified.",
+        changes=[{"setting": "SMB1", "current": "1", "target": "0"}]))
+    records = body(app.handle("GET", "/api/hardening", AUTH))
+    assert [r["fix_id"] for r in records] == ["FIX-WIN-SMB1"]
+    assert records[0]["status"] == "fixed" and records[0]["undone"] is False
+    assert records[0]["changes"][0]["target"] == "0"
+    # The dashboard never applies or undoes a fix.
+    assert app.handle("POST", "/api/hardening", AUTH).status == 404
+
+
+def test_hardening_history_needs_the_token(app):
+    assert app.handle("GET", "/api/hardening", OK_HOST).status == 401

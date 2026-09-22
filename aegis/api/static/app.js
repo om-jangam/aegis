@@ -134,6 +134,25 @@
     )), "The audit trail is empty.", 5);
   }
 
+  const FIX_STATUS = {
+    fixed: "pass", undone: "skip", not_verified: "warn", failed: "fail",
+    needs_admin: "fail", needs_confirmation: "skip", nothing_to_do: "skip", preview: "skip",
+  };
+
+  async function refreshHardening() {
+    const records = await api("/api/hardening?limit=50");
+    replace("hardening", records.map((r) => el("tr", {},
+      el("td", { class: "nowrap" }, when(r.ts)),
+      el("td", {}, el("span", { class: "status status-" + (FIX_STATUS[r.status] || "skip") },
+        r.status.replace(/_/g, " ").toUpperCase())),
+      el("td", {}, r.action === "undo" ? "Undo: " + r.title : r.title,
+        r.undone ? el("div", { class: "muted small" }, "later undone") : null,
+        r.message ? el("div", { class: "muted small" }, r.message) : null),
+      el("td", { class: "small" }, ...(r.changes || []).map((c) =>
+        el("div", {}, c.setting + ": " + c.current + " \u2192 " + c.target))),
+    )), "No fixes have been applied yet.", 4);
+  }
+
   const STATUS_ORDER = { fail: 0, warn: 1, pass: 2, skip: 3 };
 
   async function refreshPosture(force) {
@@ -164,7 +183,8 @@
 
   async function refreshAll() {
     try {
-      await Promise.all([refreshSummary(), refreshAlerts(), refreshFindings(), refreshAudit()]);
+      await Promise.all([refreshSummary(), refreshAlerts(), refreshFindings(),
+        refreshHardening(), refreshAudit()]);
     } catch (error) {
       if (error.message !== "unauthorised") {
         const live = $("live");

@@ -141,6 +141,10 @@ class DashboardApp:
             if path == "/api/audit":
                 return _json(HTTPStatus.OK,
                              [_audit_dict(a) for a in self.store.recent_audit(_limit(query, 100))])
+            if path == "/api/hardening":
+                return _json(HTTPStatus.OK,
+                             [_remediation_dict(r) for r in
+                              self.store.recent_remediations(_limit(query, 50))])
             if path == "/api/posture":
                 return _json(HTTPStatus.OK, self._posture_report(query.get("refresh") == ["1"]))
         elif method == "POST":
@@ -183,6 +187,17 @@ def _alert_dict(alert) -> dict:
         "source": alert.source, "technique": alert.technique, "score": alert.score,
         "acknowledged": alert.acknowledged, "process_name": alert.process_name,
         "parent_name": alert.parent_name,
+    }
+
+
+def _remediation_dict(record) -> dict:
+    """One hardening action, as the dashboard shows it (read-only: fixes are applied
+    from the desktop app or the command line, never from a web page)."""
+    return {
+        "id": record.id, "ts": record.timestamp.isoformat(timespec="seconds"),
+        "fix_id": record.fix_id, "title": record.title, "action": record.action,
+        "status": record.status, "message": record.message, "changes": record.changes,
+        "undone": record.undone_at is not None,
     }
 
 
