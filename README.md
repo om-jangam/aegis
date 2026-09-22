@@ -21,9 +21,13 @@
 |---|
 | ![Aegis home screen showing a status banner, security score, alert counts and charts](docs/screenshots/home.png) |
 
-| Security check: what to fix, in plain language | Alerts: what happened and what to do |
+| Security check: what to fix, and a button that fixes it | Alerts: what happened and what to do |
 |---|---|
-| ![Security check results scored 100 out of 100, each check listed with its outcome](docs/screenshots/security-check.png) | ![Alerts list, each alert with a "What should I do?" box](docs/screenshots/alerts.png) |
+| ![Security check scored 73 out of 100, each weakness listed with how to fix it and a one-click fix button, above the history of fixes already applied](docs/screenshots/security-check.png) | ![Alerts list, each alert with a "What should I do?" box](docs/screenshots/alerts.png) |
+
+| Running programs: everything using this computer, with a Stop button |
+|---|
+| ![The running programs list, each with its location, network connections, memory use and a Stop button](docs/screenshots/running-programs.png) |
 
 ## Install on Windows (no Python needed)
 

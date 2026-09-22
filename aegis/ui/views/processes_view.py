@@ -4,6 +4,7 @@ from __future__ import annotations
 import flet as ft
 
 from aegis.collectors.processes import snapshot
+from aegis.response.actions import is_protected_process
 from aegis.ui import components as c
 from aegis.ui import theme
 from aegis.ui.plain import plural
@@ -69,6 +70,7 @@ class ProcessesView(BaseView):
 
     def _row(self, p) -> ft.Control:
         sus = p.is_suspicious
+        protected = is_protected_process(p.name)
         pills = [c.pill(f"{p.memory_mb:.0f} MB memory", theme.TEXT_MUTED)]
         if p.num_connections:
             pills.insert(0, c.pill(plural(p.num_connections, "network connection"), theme.INFO))
@@ -86,9 +88,11 @@ class ProcessesView(BaseView):
                             color=theme.WARN) if sus else ft.Container(height=0),
                 ], spacing=1, expand=True, tight=True),
                 *pills,
-                ft.TextButton("Stop", icon=ft.Icons.STOP_CIRCLE_OUTLINED,
-                              tooltip=f"Stop {p.name} (process {p.pid})",
-                              on_click=lambda e, proc=p: self._confirm_stop(proc)),
+                ft.TextButton(
+                    "Stop", icon=ft.Icons.STOP_CIRCLE_OUTLINED, disabled=protected,
+                    tooltip=(f"{p.name} is part of the operating system and cannot be stopped"
+                             if protected else f"Stop {p.name} (process {p.pid})"),
+                    on_click=lambda e, proc=p: self._confirm_stop(proc)),
             ], spacing=12),
             padding=ft.Padding.symmetric(horizontal=14, vertical=8),
             bgcolor=ft.Colors.with_opacity(0.08, theme.WARN) if sus else theme.SURFACE_ALT,
