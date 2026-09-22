@@ -65,7 +65,7 @@ def _format_finding(finding: Finding, colour: bool) -> str:
 
 
 def _finding_as_dict(finding: Finding) -> dict:
-    """Render a finding as a flat JSON object for piping into a SIEM."""
+    """Render a finding as a flat JSON object for piping into other tools."""
     return {
         "timestamp": datetime.now(tz=UTC).isoformat(),
         "rule_id": finding.rule_id,
@@ -83,15 +83,66 @@ def _finding_as_dict(finding: Finding) -> dict:
 # --------------------------------------------------------------------------- #
 # Commands
 # --------------------------------------------------------------------------- #
+def _forwarding_config(args):
+    """The configured forwarding section with command-line overrides applied."""
+    from dataclasses import replace
+
+    from aegis.config import settings
+
+    changes: dict = {}
+    if getattr(args, "forward_url", None):
+        changes.update(server_url=args.forward_url, enabled=True)
+    if getattr(args, "forward", False):
+        changes["enabled"] = True
+    if getattr(args, "forward_batch_size", None):
+        changes["batch_size"] = args.forward_batch_size
+    if getattr(args, "forward_flush_interval", None):
+        changes["flush_interval_seconds"] = args.forward_flush_interval
+    if getattr(args, "forward_insecure", False):
+        changes["verify_tls"] = False
+    return replace(settings.forwarding, **changes)
+
+
+def _cli_forwarder(args):
+    """(forwarder or None, error message or None) for the monitoring commands."""
+    from aegis.config import DATA_DIR
+    from aegis.forwarding import build_forwarder
+
+    try:
+        return build_forwarder(_forwarding_config(args), DATA_DIR,
+                               api_key=getattr(args, "forward_api_key", None)), None
+    except ValueError as exc:
+        return None, str(exc)
+
+
+def _start_background_security_check(service) -> None:
+    """Give forwarded heartbeats a security score without delaying start-up."""
+    from aegis.posture import run_posture_checks
+
+    def run() -> None:
+        try:
+            service.record_posture(run_posture_checks())
+        except Exception:  # noqa: BLE001
+            log.exception("Background security check failed")
+
+    threading.Thread(target=run, name="security-check", daemon=True).start()
+
+
 def cmd_status(args) -> int:
     """Report what Aegis can see and do on this host."""
     from aegis.alerting.notifier import notification_backend
-    from aegis.config import DATA_DIR
+    from aegis.config import DATA_DIR, settings
     from aegis.detection.engine import DetectionEngine
+    from aegis.forwarding import QUEUE_FILE, EventQueue
     from aegis.platforms import CURRENT_OS, is_elevated, privilege_hint
     from aegis.response.factory import get_firewall
 
     backend = get_firewall()
+    queued = 0
+    if (DATA_DIR / QUEUE_FILE).exists():
+        queue = EventQueue(DATA_DIR / QUEUE_FILE)
+        queued = len(queue)
+        queue.close()
     info = {
         "version": __version__,
         "platform": CURRENT_OS.value,
@@ -102,11 +153,20 @@ def cmd_status(args) -> int:
         "notifications": notification_backend(),
         "detection_rules": DetectionEngine().rule_count,
         "data_dir": str(DATA_DIR),
+        "forwarding": {
+            "enabled": settings.forwarding.enabled,
+            "server_url": settings.forwarding.server_url,
+            "queued_events": queued,
+        },
     }
     if args.json:
         print(json.dumps(info, indent=2))
         return 0
 
+    forwarding = info["forwarding"]
+    forwarding_text = f"on -> {forwarding['server_url']}" if forwarding["enabled"] else "off"
+    if queued:
+        forwarding_text += f" ({queued} event(s) queued)"
     print(f"Aegis {__version__} - {__description__}")
     print(f"  Platform           {info['platform']} (Python {info['python']})")
     print(f"  Privileges         {'elevated' if info['elevated'] else 'standard user'}")
@@ -114,6 +174,7 @@ def cmd_status(args) -> int:
     print(f"  Response           {'available' if info['response_available'] else 'UNAVAILABLE'}")
     print(f"  Notifications      {info['notifications']}")
     print(f"  Detection rules    {info['detection_rules']}")
+    print(f"  Forwarding         {forwarding_text}")
     print(f"  Data directory     {info['data_dir']}")
     if not info["elevated"]:
         print(f"\n  Note: {privilege_hint()}")
@@ -125,9 +186,15 @@ def cmd_monitor(args) -> int:
     from aegis.detection.engine import DetectionEngine
     from aegis.service import SecurityService
 
+    forwarder, error = _cli_forwarder(args)
+    if error:
+        print(f"Forwarding is misconfigured: {error}", file=sys.stderr)
+        return 2
+
     colour = _use_colour(sys.stdout) and not args.json
     engine = DetectionEngine(sigma_paths=args.sigma)
-    service = SecurityService(engine=engine, auto_respond=args.auto_respond)
+    service = SecurityService(engine=engine, auto_respond=args.auto_respond,
+                              forwarder=forwarder)
     seen = threading.Event()
 
     def on_finding(finding: Finding) -> None:
@@ -151,10 +218,14 @@ def cmd_monitor(args) -> int:
         detail = f"{engine.rule_count} rules"
         if engine.sigma_report and engine.sigma_report.skipped_count:
             detail += f", {engine.sigma_report.skipped_count} Sigma rules skipped"
+        if forwarder is not None:
+            detail += f", exporting to SENTINEL-X at {forwarder.sender.url}"
         print(f"Aegis monitoring started ({mode}, {detail}). Press Ctrl+C to stop.\n",
               flush=True)
 
     service.start()
+    if forwarder is not None:
+        _start_background_security_check(service)
     try:
         stop.wait()
     finally:
@@ -492,7 +563,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_monitor = sub.add_parser("monitor", help="run headless detection in the foreground")
     p_monitor.add_argument("--json", action="store_true",
-                           help="emit one JSON object per finding (for a SIEM)")
+                           help="emit one JSON object per finding (for scripts and log pipelines)")
     p_monitor.add_argument("--min-severity", type=_severity, default=Severity.LOW,
                            metavar="LEVEL",
                            help="suppress findings below this severity "
@@ -501,6 +572,20 @@ def build_parser() -> argparse.ArgumentParser:
                            help="automatically block hosts behind high-severity findings")
     p_monitor.add_argument("--sigma", action="append", default=None, metavar="PATH",
                            help="extra directory of Sigma rules (repeatable)")
+    export = p_monitor.add_argument_group(
+        "export to SENTINEL-X (optional; overrides the 'forwarding' config section)")
+    export.add_argument("--forward", action="store_true",
+                        help="export events using the configured server")
+    export.add_argument("--forward-url", metavar="URL",
+                        help="SENTINEL-X server URL (https://); implies --forward")
+    export.add_argument("--forward-api-key", metavar="KEY",
+                        help="ingest token (prefer the AEGIS_FORWARDING_API_KEY variable)")
+    export.add_argument("--forward-batch-size", type=int, metavar="N",
+                        help="events per request (default 50)")
+    export.add_argument("--forward-flush-interval", type=float, metavar="SECONDS",
+                        help="seconds between sends (default 10)")
+    export.add_argument("--forward-insecure", action="store_true",
+                        help="do not verify the server's TLS certificate (testing only)")
     p_monitor.set_defaults(func=cmd_monitor)
 
     p_sigma = sub.add_parser(

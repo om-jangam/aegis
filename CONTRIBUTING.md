@@ -14,11 +14,11 @@ pip install -e ".[dev]"        # installs the package + pytest, ruff
 ## Before you push
 
 ```bash
-ruff check aegis tests evaluation      # lint (must be clean)
+ruff check aegis tests evaluation packaging   # lint (must be clean)
 pytest --cov=aegis                     # tests (must pass)
 ```
 
-CI runs the same checks on Windows for Python 3.11 and 3.12.
+CI runs the same checks on Linux (Python 3.11–3.13), Windows and macOS.
 
 ## Adding a detection rule
 

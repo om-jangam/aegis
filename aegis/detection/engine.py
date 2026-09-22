@@ -51,12 +51,6 @@ class DetectionEngine:
                 findings.append(finding)
         return findings
 
-    def process_batch(self, events) -> list[Finding]:
-        out: list[Finding] = []
-        for e in events:
-            out.extend(self.process(e))
-        return out
-
     @property
     def rule_count(self) -> int:
         return len(self.rules)

@@ -38,7 +38,9 @@ class AlwaysHigh(DetectionRule):
 
 
 @pytest.fixture
-def service(tmp_path):
+def service(tmp_path, monkeypatch):
+    # Independent of the programs trusted in the real user profile.
+    monkeypatch.setattr(settings, "trusted_programs", [])
     svc = SecurityService(
         store=SQLiteEventStore(tmp_path / "trust.db"),
         engine=DetectionEngine(rules=[AlwaysHigh()]),

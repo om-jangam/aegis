@@ -20,9 +20,14 @@ documented in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md). In summary:
 - The firewall engine executes `netsh` with **argument lists and `shell=False`**;
   all rule input is validated first (see `aegis/core/validators.py`). Command
   injection is regression-tested.
-- Telemetry, findings and reports **never leave the host**. The only outbound
-  request is `aegis intel update`, which runs only when a user invokes it,
-  fetches fixed HTTPS feed URLs with a size cap, and validates every line.
+- Telemetry, findings and reports **stay on the host by default**. Outbound
+  requests happen only when a user asks for them:
+  - `aegis intel update` fetches fixed HTTPS feed URLs with a size cap and
+    validates every line;
+  - forwarding to SENTINEL-X (off by default) sends shared-schema events over
+    HTTPS with a bearer token, never follows redirects, redacts secrets from
+    command lines, and never sends API keys, the dashboard token or file
+    contents.
 - Read-only monitoring, `aegis check` and the dashboard run unprivileged; only
   firewall mutation needs Administrator / root.
 - The web dashboard (`aegis serve`) binds to loopback by default, requires a

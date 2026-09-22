@@ -147,6 +147,7 @@ class AegisApp:
 
     def posture_updated(self, report) -> None:
         self.posture_report = report
+        self.service.record_posture(report)
         if isinstance(self.views[self.active_index], DashboardView):
             self.views[self.active_index].refresh()
 

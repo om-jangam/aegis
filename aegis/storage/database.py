@@ -6,8 +6,7 @@ readers and the writer from blocking each other. This is appropriate for a
 single-host desktop tool with a handful of background threads.
 
 Only this module knows SQL — callers depend on the :class:`EventStore`
-interface, so the backend could later be swapped (e.g. OpenSearch) without
-touching the rest of the app.
+interface.
 """
 from __future__ import annotations
 

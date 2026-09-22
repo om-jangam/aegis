@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/om-jangam/aegis/blob/main/shared/event_schema.json",
+  "title": "Aegis to SENTINEL-X security event",
+  "description": "Contract between the Aegis host agent and the SENTINEL-X server. Aegis POSTs batches as {\"events\": [<event>, ...]}. Version 1.0. Additions beyond the original contract are marked 'Aegis addition' and are optional.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "timestamp",
+    "agent",
+    "event_type",
+    "severity",
+    "rule",
+    "mitre",
+    "details",
+    "response_taken"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "uuid4, unique per event"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+      "description": "ISO 8601 UTC, e.g. 2026-09-16T10:30:00Z"
+    },
+    "agent": {
+      "type": "object",
+      "required": ["agent_id", "hostname", "os", "aegis_version"],
+      "properties": {
+        "agent_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "uuid4, generated once per install"
+        },
+        "hostname": { "type": "string" },
+        "os": { "enum": ["windows", "linux", "macos"] },
+        "aegis_version": { "type": "string" }
+      }
+    },
+    "event_type": {
+      "enum": ["alert", "finding", "audit_score", "heartbeat"]
+    },
+    "severity": {
+      "enum": ["info", "low", "medium", "high", "critical"]
+    },
+    "rule": {
+      "type": "object",
+      "required": ["id", "name", "source"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "source": { "enum": ["python", "sigma", "threat_intel", "ml"] }
+      }
+    },
+    "mitre": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["technique_id", "technique_name", "tactic"],
+        "properties": {
+          "technique_id": { "type": "string", "pattern": "^T\\d{4}(\\.\\d{3})?$" },
+          "technique_name": { "type": "string" },
+          "tactic": { "type": "string" }
+        }
+      }
+    },
+    "details": {
+      "type": "object",
+      "required": ["network", "message"],
+      "properties": {
+        "process": {
+          "type": "object",
+          "description": "Optional. Command lines are redacted for secrets and truncated."
+        },
+        "network": {
+          "type": "object",
+          "required": ["src_ip", "dst_ip", "dst_port", "protocol"],
+          "properties": {
+            "src_ip": { "type": "string" },
+            "dst_ip": { "type": "string" },
+            "dst_port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+            "protocol": { "type": "string" }
+          }
+        },
+        "file": {
+          "type": "object",
+          "description": "Optional. Path, action, sizes and hashes only; file contents are never sent."
+        },
+        "audit": {
+          "type": "object",
+          "description": "Aegis addition (optional): the security check result, on audit_score events and on heartbeats.",
+          "required": ["score", "grade", "failed", "warnings", "passed", "checked_at"],
+          "properties": {
+            "score": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+            "grade": { "type": ["string", "null"] },
+            "failed": { "type": "integer", "minimum": 0 },
+            "warnings": { "type": "integer", "minimum": 0 },
+            "passed": { "type": "integer", "minimum": 0 },
+            "checked_at": { "type": ["string", "null"] }
+          }
+        },
+        "message": {
+          "type": "string",
+          "description": "plain-language explanation"
+        }
+      }
+    },
+    "response_taken": {
+      "enum": ["none", "blocked_host", "notified"]
+    }
+  }
+}

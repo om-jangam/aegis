@@ -51,10 +51,6 @@ def is_macos() -> bool:
     return CURRENT_OS is OS.MACOS
 
 
-def is_posix() -> bool:
-    return CURRENT_OS in (OS.LINUX, OS.MACOS)
-
-
 # --------------------------------------------------------------------------- #
 # Privileges
 # --------------------------------------------------------------------------- #

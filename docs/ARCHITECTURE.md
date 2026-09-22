@@ -1,259 +1,206 @@
 # Aegis — Architecture
 
-Aegis is a **modular, event-driven host detection & response tool** for Windows.
-This document explains the design, the responsibility of every module, how data
-flows end to end, and how to extend the system.
+Aegis is **endpoint security and hardening for one computer**. It answers one
+question: *is this machine secure, what weaknesses exist, and how can they be
+detected and safely fixed?* It runs on Windows, Linux and macOS.
+
+Aegis is deliberately **not** a SIEM, a central log platform or a multi-host
+investigation tool. Investigation across machines belongs to the separate
+SENTINEL-X project. Aegis can optionally *export* its events to SENTINEL-X, but
+that is an add-on integration: Aegis works completely without it.
 
 ---
 
-## 1. Design philosophy
+## 1. Design idea
 
-The whole system is organized around **one idea**: separate *observing* from
-*deciding* from *acting*, and connect them with a single, source-agnostic data
-type — the **normalized `Event`**.
+Observing, deciding and acting are kept apart and connected by one
+source-agnostic data type, the normalized **`Event`**:
 
 ```
-        OBSERVE                DECIDE                 ACT / RECORD
-   ┌───────────────┐     ┌────────────────┐     ┌───────────────────┐
-   │  Collectors   │──►  │ Detection      │──►  │ Response          │
-   │ (psutil,      │Event│ engine         │Find-│ Alerting          │
-   │  Sysmon, ETW) │     │ (rules + ML)   │ ing │ Storage / Audit   │
-   └───────────────┘     └────────────────┘     └───────────────────┘
+      OBSERVE                 DECIDE                  ACT / RECORD
+ ┌────────────────┐     ┌─────────────────┐     ┌──────────────────────┐
+ │ Collectors     │──►  │ Detection engine│──►  │ Alerts · Response    │
+ │ network,       │Event│ Python rules,   │Find-│ SQLite store · Audit │
+ │ processes,     │     │ Sigma, threat   │ ing │ (optional export)    │
+ │ file integrity │     │ intel, ML assist│     │                      │
+ └────────────────┘     └─────────────────┘     └──────────────────────┘
+
+ Security check (posture):  checks ──► PostureReport ──► score, weaknesses, advice
 ```
 
-Because collectors depend only on the `Event` contract — not the other way around
-— we can add a new telemetry source (e.g. Sysmon) **without touching detection**,
-and add a new detection **without touching collectors**. This is the property that
-makes the codebase testable, extensible, and interview-defensible.
+Collectors depend only on the `Event` contract, so a new telemetry source needs
+no detection changes and a new detection needs no collector changes.
 
-**Principles applied:**
-- **Separation of concerns / layering** — data plane (events) vs decision plane
-  (findings) vs action plane (response) vs presentation (UI).
-- **Dependency inversion (SOLID-D)** — high-level pipeline depends on *abstract*
-  `Collector` / `DetectionRule` / `Responder` / `EventStore`, never concretions.
-- **Open/closed (SOLID-O)** — new rules/collectors/responders are added, existing
-  code isn't modified.
-- **Fail-safe** — a monitor error degrades gracefully; it never crashes the tool.
-- **Explainability** — every `Finding` carries its rule, ATT&CK mapping, and reasons.
+**Principles**
+- **Layering.** The engine (core, collectors, detection, posture, response,
+  storage, alerting, intel) never imports a front end (UI, dashboard, CLI) or
+  the export package. `tests/test_architecture.py` enforces this.
+- **Dependency inversion.** The pipeline depends on `Collector`,
+  `DetectionRule`, `PostureCheck`, `FirewallBackend` and `EventStore`, never on
+  concrete classes.
+- **Fail safe.** A failing collector, rule or check is logged and skipped. A
+  monitoring tool must never crash the host it protects.
+- **Explainable.** Every finding carries its rule, MITRE ATT&CK mapping,
+  reasons and plain-language guidance.
+- **Every action is recorded.** Rule changes, blocks and detections are written
+  to the audit trail.
 
-## 2. System context (C4 level 1)
+## 2. System context
 
 ```mermaid
 flowchart TB
-    user([Security-conscious user / blue-teamer])
-    subgraph host["Windows host"]
-        aegis["Aegis<br/>(local app)"]
-        fw["Windows Firewall<br/>(netsh)"]
-        os["OS telemetry<br/>(sockets, processes,<br/>later: Sysmon/ETW)"]
+    user([Person using this computer])
+    subgraph host["This computer"]
+        aegis["Aegis"]
+        fw["Native firewall<br/>netsh · nftables · pf"]
+        os["OS telemetry<br/>sockets · processes · files · settings"]
     end
-    user -->|views dashboards,<br/>manages rules| aegis
-    os -->|telemetry| aegis
-    aegis -->|add/enable/delete<br/>block rules| fw
-    aegis -->|desktop toast alerts| user
-    aegis -.->|NO cloud, NO network egress| x((✗))
+    user -->|desktop app, CLI,<br/>local dashboard| aegis
+    os -->|polled| aegis
+    aegis -->|validated block rules| fw
+    aegis -->|desktop alerts| user
+    aegis -. optional, off by default .-> sx["SENTINEL-X<br/>(separate project)"]
+    aegis -. optional, on request .-> feeds["Public threat-intel lists"]
 ```
 
-Aegis is entirely local. There is **no server and no network egress** — a
-deliberate privacy and security decision (see `THREAT_MODEL.md`).
+By default Aegis makes no network calls. The only outbound traffic is a
+threat-intel list download the user asks for (`aegis intel update`) and export
+to SENTINEL-X when the user enables it.
 
-## 3. Container / module view (C4 level 2)
-
-```mermaid
-flowchart LR
-    subgraph collectors["aegis.collectors"]
-        C1["network (psutil)"]
-        C2["processes (psutil)"]
-        C3["sysmon / etw (future)"]
-    end
-    subgraph core["aegis.core"]
-        EV["events (normalized schema)"]
-        MO["models (Finding/Alert/Rule/Audit)"]
-        VA["validators (anti-injection)"]
-    end
-    subgraph detection["aegis.detection"]
-        RE["rule engine + context"]
-        RU["rules/* (ATT&CK-mapped)"]
-        ML["ml_assist (IsolationForest)"]
-    end
-    subgraph response["aegis.response"]
-        FR["firewall responder"]
-    end
-    subgraph storage["aegis.storage"]
-        DB["SQLite EventStore"]
-    end
-    subgraph alerting["aegis.alerting"]
-        NO["notifier (toast + dedup)"]
-    end
-    subgraph ui["aegis.ui"]
-        UI["Flet console"]
-    end
-    SV["service.py (orchestrator)"]
-
-    C1 & C2 & C3 --> EV
-    EV --> RE
-    RU --> RE
-    ML --> RE
-    RE --> MO
-    SV --> collectors
-    SV --> detection
-    MO --> DB
-    MO --> NO
-    MO --> FR
-    FR --> VA
-    UI --> SV
-    DB --> UI
-```
-
-## 4. The modules (responsibilities)
+## 3. Modules
 
 | Package / module | Responsibility |
-|------------------|----------------|
-| `core/events.py` | **Normalized telemetry schema** — `Event`, `NetworkEvent`, `ProcessEvent`, `EventType/Source/Direction`. Immutable (frozen) value objects. |
-| `core/models.py` | **Decision/domain models** — `Severity`, `Finding`, `Alert`, `AuditEvent`, `FirewallRule` + firewall enums. |
-| `core/validators.py` | **Input validation** for rule fields (names, IPs, ports, paths). The anti-command-injection front line. |
-| `collectors/base.py` | `Collector` ABC — the contract every telemetry source implements (`poll`, lifecycle, `available()`). |
-| `collectors/network.py`, `processes.py` | psutil-based collectors emitting `NetworkEvent`/`ProcessEvent`. |
-| `detection/base.py` | `DetectionRule` ABC + thread-safe `DetectionContext` (rolling history for stateful rules). |
-| `detection/ports.py` | Shared port constants (single source of truth for rules + ML). |
-| `detection/engine.py` | `DetectionEngine` — offers each event to matching rules, collects findings. |
-| `detection/rules/*` | Concrete **ATT&CK-mapped** rules (C2 port, remote-svc, interpreter, scanning, masquerade…). |
-| `detection/ml_assist.py` | IsolationForest anomaly **assist**, with a reproducible evaluation harness. |
-| `response/base.py` | `Responder` ABC + `ResponseResult`. |
-| `response/firewall.py` | Secure `netsh` engine (argument-list, validated) + block/contain actions. |
-| `storage/base.py` | `EventStore` ABC — persistence contract. |
-| `storage/database.py` | SQLite implementation (WAL, thread-safe) for events/findings/alerts/audit. |
-| `alerting/notifier.py` | Desktop toast notifications with cooldown de-duplication. |
-| `service.py` | **Orchestrator** — wires collectors → engine → store/alert/response; the single API the UI talks to. |
-| `ui/` | Flet security console (dashboard, connections, processes, detections, rules, audit, settings). |
-| `api/` | Reserved thin FastAPI surface for a future distributed deployment (not yet implemented). |
-| `config.py` / `logging_config.py` | Settings (persisted JSON) and rotating structured logging. |
+|---|---|
+| `core/events.py` | Normalized, immutable telemetry: `NetworkEvent`, `ProcessEvent`, `FileEvent`. |
+| `core/models.py` | Domain models: `Severity`, `Finding`, `Alert`, `AuditEvent`, `FirewallRule`. |
+| `core/validators.py` | Input validation for rule fields; the front line against command injection. |
+| `collectors/` | psutil network and process collectors, and file integrity monitoring (baseline + digest comparison). |
+| `detection/engine.py`, `base.py` | Offers each event to the rules that want it; shared rolling `DetectionContext`. |
+| `detection/rules/` | Hand-written, stateful, ATT&CK-mapped rules (network, process, file, threat intel). |
+| `detection/sigma/` | Loader, condition parser and field mapping for Sigma rules; bundled rules in `sigma/rules/`. |
+| `detection/ruleset.py` | Combines built-in and Sigma rules into the active rule set. |
+| `detection/ml_assist.py` | IsolationForest anomaly assist (evaluated in `docs/ML_EVALUATION.md`). |
+| `detection/trust.py`, `guidance.py` | Programs the user trusts; plain-language "what to do" advice per technique. |
+| `posture/` | The security check: firewall, exposed services, updates, startup programs, Defender, UAC, RDP, SMBv1, auto-logon, disk encryption, SSH, sensitive file permissions. Produces a scored `PostureReport`. |
+| `intel/` | Local threat-intel blocklists (IPs and CIDR ranges) and the feed downloader. |
+| `response/` | `FirewallBackend` contract with Windows (`netsh`), Linux (`nftables`) and macOS (`pf` anchor) engines; argument-list execution, never a shell. `NullFirewall` when no backend is usable. |
+| `storage/` | `EventStore` contract and its SQLite (WAL) implementation for events, findings, alerts and audit. |
+| `alerting/notifier.py` | Desktop notifications with cooldown de-duplication. |
+| `service.py` | Orchestrator: collectors → engine → store / alert / response, the single façade the front ends use. |
+| `ui/` | Flet desktop app: dashboard, security check, connections, processes, detections, rules, audit, settings. |
+| `api/` | Local web dashboard (`aegis serve`): loopback only, token, Host allow-list, strict CSP. A view of this one computer. |
+| `reporting.py` | Self-contained, escaped HTML security report (`aegis report`). |
+| `cli.py` | `status`, `monitor`, `check`, `sigma`, `intel`, `serve`, `report`, `rules`, `block`, `console`. |
+| `forwarding/` | **Optional** export to SENTINEL-X: shared-schema mapping, SQLite outbox, HTTPS sender with backoff, heartbeat. Off by default. |
+| `config.py`, `platforms.py`, `logging_config.py` | Settings (JSON), OS and privilege detection, rotating logs. |
 
-All modules above are implemented. The backend (core, collectors, detection, ML,
-response, storage, alerting, service) is covered by the test suite (~84% line
-coverage); the `ui/` package is validated by a headless construction test and live
-runs rather than pytest (the usual pragmatic split for GUI code). `api/` is an
-intentional, documented placeholder for the distributed roadmap.
-
-## 5. Key abstractions (the contracts)
+## 4. Key contracts
 
 ```python
-# A telemetry source
 class Collector(ABC):
-    source: EventSource
-    def poll(self) -> Iterable[Event]: ...      # one scan
-    def available(self) -> bool: ...            # can it run here?
+    def poll(self) -> Iterable[Event]: ...
+    def available(self) -> bool: ...
 
-# A detection
 class DetectionRule(ABC):
     rule_id: str; technique: str; tactic: str; severity: Severity
-    event_types: tuple[EventType, ...]          # engine pre-filters on this
+    event_types: tuple[EventType, ...]
     def evaluate(self, event: Event, ctx: DetectionContext) -> Finding | None: ...
 
-# A response action
-class Responder(ABC):
-    def can_handle(self, finding: Finding) -> bool: ...
-    def respond(self, finding: Finding) -> ResponseResult: ...
+class PostureCheck(ABC):
+    check_id: str
+    def run(self, ctx: PostureContext) -> CheckResult: ...
 
-# Persistence
+class FirewallBackend(ABC):
+    def create_rule(self, rule: FirewallRule) -> FirewallResult: ...
+    def block_ip(self, ip: str, ...) -> FirewallResult: ...
+
 class EventStore(ABC):
     def save_events(...); save_finding(...); save_alert(...); add_audit(...)
 ```
 
-Adding a capability means implementing one small interface — nothing else changes.
+Adding a capability means implementing one of these interfaces.
 
-## 6. Data flow — a suspicious connection, end to end
+## 5. Data flow: a suspicious connection
 
 ```mermaid
 sequenceDiagram
-    participant OS as Windows sockets
     participant COL as network collector
+    participant SVC as service
     participant ENG as detection engine
-    participant ML as ml assist
-    participant STORE as SQLite/audit
-    participant RESP as firewall responder
-    participant UI as Flet UI + toast
+    participant DB as SQLite + audit
+    participant UI as app / toast
+    participant FW as firewall backend
 
-    OS->>COL: poll() every N seconds
-    COL->>ENG: NetworkEvent(chrome→45.9.x.x:4444)
-    ENG->>ENG: rules matching NETWORK_CONNECTION
-    Note over ENG: T1571 rule: port 4444 to public IP → Finding(score 80)
-    ENG->>ML: (optional) anomaly score
-    ML-->>ENG: +anomaly points / reasons
-    ENG->>STORE: save event + finding + audit
-    ENG->>UI: alert (severity HIGH, ATT&CK T1571)
-    UI->>OS: (user clicks "Block IP")
-    UI->>RESP: respond(finding)
-    RESP->>RESP: validate IP, build argument-list netsh
-    RESP->>OS: netsh add rule (block, no shell)
-    RESP->>STORE: audit "ip_blocked"
+    COL->>SVC: NetworkEvent(evil.exe → 45.9.1.1:4444)
+    SVC->>ENG: process(event)
+    ENG-->>SVC: Finding(NET-C2-PORT, T1571, score 85)
+    SVC->>DB: save event, finding, audit
+    SVC->>UI: alert (unless the program is trusted or it repeats)
+    UI->>SVC: user clicks "Block"  (or --auto-respond)
+    SVC->>FW: validated block rule, no shell
+    SVC->>DB: audit "ip_blocked"
 ```
 
-The same path works whether the event came from psutil today or Sysmon/ETW later
-— the engine only ever sees a normalized `Event`.
+## 6. Concurrency and lifecycle
 
-## 7. Concurrency model
+- Each collector polls on its own daemon thread; every poll is guarded.
+- SQLite runs in WAL mode behind a re-entrant lock shared by the monitor
+  threads and the UI.
+- UI updates are marshalled onto the Flet event loop.
+- On start the service purges data past retention and, on Linux with root,
+  re-applies saved nftables rules (nftables does not persist across reboots).
+- On stop, collectors are signalled, the optional exporter flushes, and the ML
+  model is saved.
 
-- **Collectors** run on **background daemon threads**, polling on a configurable
-  interval. Each poll is wrapped so an exception logs and the loop continues.
-- The **detection engine** processes events off those threads and writes to SQLite.
-- **SQLite** runs in WAL mode with a process-wide lock, safe for the handful of
-  monitor threads plus the UI thread.
-- The **UI** (Flet) runs its own event loop; background→UI updates are marshalled
-  onto the UI thread (no cross-thread widget mutation).
-- On shutdown, monitors are signalled to stop and the ML model is persisted.
+## 7. Extension points
 
-## 8. Extension points (open/closed in practice)
+| To add… | Implement | Why nothing else changes |
+|---|---|---|
+| Telemetry source | `Collector` | the engine only sees `Event` |
+| Detection | `DetectionRule`, or drop a Sigma YAML file | the engine iterates rules generically |
+| Security check | `PostureCheck` | the report scores any check result |
+| Firewall platform | `FirewallBackend` | the factory picks the backend per OS |
+| Storage | `EventStore` | callers use the interface |
 
-| To add… | Do this | Nothing else changes because… |
-|---------|---------|-------------------------------|
-| A telemetry source | Subclass `Collector`, emit `Event`s | the engine depends on `Event`, not the source |
-| A detection | Subclass `DetectionRule`, set ATT&CK metadata | the engine iterates rules generically |
-| A response | Subclass `Responder` | the orchestrator dispatches by `can_handle()` |
-| A storage backend | Implement `EventStore` | callers depend on the interface |
-
-## 9. Directory layout
+## 8. Layout
 
 ```
 aegis/
-├── core/         events.py · models.py · validators.py     # the shared language
-├── collectors/   base.py (+ network.py, processes.py …)    # OBSERVE
-├── detection/    base.py + rules/ + ml_assist.py           # DECIDE
-├── response/     base.py (+ firewall.py)                   # ACT
-├── storage/      base.py (+ database.py)                   # RECORD
-├── alerting/     notifier.py                               # NOTIFY
-├── api/          (optional FastAPI, future)                # DECOUPLE
-├── ui/           Flet console                              # PRESENT
-├── service.py    orchestrator                              # WIRE
-├── config.py · logging_config.py                           # cross-cutting
-docs/             THREAT_MODEL.md · ARCHITECTURE.md
-tests/            unit + injection + contract tests
-reference_scaffold/   archived legacy (excluded from tooling)
+├── core/        shared language: events, models, validators
+├── collectors/  OBSERVE   network · processes · file integrity
+├── detection/   DECIDE    rules · sigma · ml_assist · trust · guidance
+├── posture/     AUDIT     security check and score
+├── intel/       threat-intel blocklists
+├── response/    ACT       netsh · nftables · pf backends
+├── storage/     RECORD    SQLite store and audit trail
+├── alerting/    NOTIFY    desktop notifications
+├── service.py   WIRE      orchestrator
+├── ui/ api/ cli.py reporting.py   front ends
+└── forwarding/  optional export to SENTINEL-X
+docs/        ARCHITECTURE · DETECTIONS · THREAT_MODEL · ML_EVALUATION
+evaluation/  reproducible ML evaluation
+packaging/   Windows build (PyInstaller + Inno Setup)
+shared/      event_schema.json (export contract)
+tests/       unit, contract, injection and architecture tests
 ```
 
-## 10. Technology choices (rationale in brief)
+## 9. Technology choices
 
-| Choice | Why | Alternative rejected |
-|--------|-----|----------------------|
-| **Python 3.11+** | Rapid, readable, great security ecosystem | — |
-| **Flet 0.86** | Modern Python UI + charts; keeps one language | Electron/Tauri (extra toolchain) |
-| **psutil** | Portable socket/process telemetry, no driver | raw ETW-only (harder, later) |
-| **SQLite (WAL)** | Zero-config local store, transactional | Postgres/OpenSearch (overkill for one host) |
-| **scikit-learn IsolationForest** | Simple, explainable-enough anomaly *assist* | Deep models (unjustified complexity) |
-| **MITRE ATT&CK mapping** | The language of detection engineering | ad-hoc severity only |
-| **pytest + ruff + GitHub Actions** | Tested, linted, CI-verified | untested scripts |
+| Choice | Why |
+|---|---|
+| Python 3.11+ | readable, strong security ecosystem |
+| Flet | desktop UI in the same language |
+| psutil | portable socket and process telemetry, no driver |
+| SQLite (WAL) | zero-configuration local store; right-sized for one host |
+| Sigma + MITRE ATT&CK | the industry's detection format and vocabulary |
+| scikit-learn IsolationForest | a simple, explainable anomaly *assist* |
+| pytest, ruff, GitHub Actions | tested on Linux, Windows and macOS on every push |
 
-## 11. Scalability path (documented, not built here)
+## 10. Scope
 
-Single-host today; the seams to grow are already in place:
+**In scope:** security audit, hardening guidance, monitoring, local detection,
+responses on this computer, and a local dashboard of this computer.
 
-```
-Today:   [ collectors → engine → SQLite → Flet ]   (one process, one host)
-
-Future:  [ agent: collectors → engine ] --HTTP--> [ FastAPI + OpenSearch ]
-                                                          │
-                                                    [ web console ]   (many hosts)
-```
-
-Swapping `EventStore` (SQLite → OpenSearch) and exposing the engine behind the
-existing `api/` package turns Aegis into a multi-host, EDR-style system **without
-rewriting** collectors or detections. That is the payoff of the Option B design.
+**Out of scope:** central log management, multi-host correlation, incident
+management, attack-chain reconstruction and SOC analytics. Those belong to
+SENTINEL-X, which Aegis can feed through its optional export.

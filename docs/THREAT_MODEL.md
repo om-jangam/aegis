@@ -134,8 +134,9 @@ is measured, not assumed.
   if replaced by an attacker with write access to the app-data dir. Residual risk;
   mitigated by (a) the file living in a per-user dir, (b) guarded loading, and
   (c) a documented option to disable the ML assist entirely.
-- **No multi-host / central management** in this scope (single-endpoint tool). The
-  architecture leaves a clean path to a distributed model (see `ARCHITECTURE.md`).
+- **No multi-host / central management**: Aegis secures one endpoint. Investigation
+  across machines belongs to the separate SENTINEL-X project, which Aegis can
+  optionally export to.
 - **Not a replacement** for Windows Defender / a commercial EDR; Aegis is a
   focused, educational, defensible *complement*.
 

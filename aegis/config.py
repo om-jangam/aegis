@@ -30,6 +30,28 @@ ASSETS_DIR: Path = Path(__file__).resolve().parent.parent / "assets"
 
 
 @dataclass
+class ForwardingSettings:
+    """Sending events to a SENTINEL-X server. Off unless explicitly enabled."""
+
+    enabled: bool = False
+    server_url: str = ""
+    # Prefer the AEGIS_FORWARDING_API_KEY environment variable over storing it here.
+    api_key: str = ""
+    batch_size: int = 50
+    flush_interval_seconds: float = 10.0
+    verify_tls: bool = True
+    ingest_path: str = "/api/v1/ingest/events"
+
+    @classmethod
+    def from_value(cls, value) -> ForwardingSettings:
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, dict):
+            return cls()
+        return cls(**{k: v for k, v in value.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
 class Settings:
     """User-adjustable settings, persisted to config.json."""
 
@@ -87,6 +109,13 @@ class Settings:
     suspicious_ports: list[int] = field(default_factory=lambda: [
         23, 445, 3389, 4444, 5555, 6667, 31337, 1337, 9001,
     ])
+
+    # Forwarding to a SENTINEL-X server (see aegis.forwarding)
+    forwarding: ForwardingSettings = field(default_factory=ForwardingSettings)
+
+    def __post_init__(self) -> None:
+        # config.json stores the section as a plain object.
+        self.forwarding = ForwardingSettings.from_value(self.forwarding)
 
     def save(self) -> None:
         # Atomic write: serialize to a temp file, then os.replace() so a crash

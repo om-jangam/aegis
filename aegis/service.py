@@ -7,6 +7,9 @@ Owns the subsystems and connects them into the pipeline:
 It is the single façade the UI talks to. Collectors run on background daemon
 threads; each poll is fully guarded so a failure logs and the loop continues —
 a monitoring tool must never crash the host it protects.
+
+Exporting to SENTINEL-X is an optional integration: when it is disabled (the
+default) no exporter exists and nothing here changes behaviour.
 """
 from __future__ import annotations
 
@@ -19,7 +22,7 @@ from aegis.collectors.base import Collector
 from aegis.collectors.filesystem import FileIntegrityCollector
 from aegis.collectors.network import NetworkCollector
 from aegis.collectors.processes import ProcessCollector
-from aegis.config import settings
+from aegis.config import DATA_DIR, settings
 from aegis.core.events import Event, NetworkEvent, ProcessEvent
 from aegis.core.models import Alert, AuditEvent, Finding, FirewallRule, Severity
 from aegis.detection.engine import DetectionEngine
@@ -40,21 +43,22 @@ def _attach_program(finding: Finding, event: Event) -> None:
         finding.process_name = finding.process_name or event.process_name
 
 
-def severity_for(score: int) -> Severity:
-    if score >= 90:
-        return Severity.CRITICAL
-    if score >= 70:
-        return Severity.HIGH
-    if score >= 40:
-        return Severity.MEDIUM
-    if score >= 20:
-        return Severity.LOW
-    return Severity.INFO
+def _default_forwarder():
+    """The configured SENTINEL-X exporter, or None when export is off or misconfigured."""
+    if not settings.forwarding.enabled:
+        return None
+    from aegis.forwarding import build_forwarder
+
+    try:
+        return build_forwarder(settings.forwarding, DATA_DIR)
+    except ValueError as exc:
+        log.error("Export to SENTINEL-X is disabled: %s", exc)
+        return None
 
 
 class SecurityService:
     def __init__(self, store=None, engine=None, notifier=None, firewall=None,
-                 collectors=None, ml="default", auto_respond=False):
+                 collectors=None, ml="default", auto_respond=False, forwarder="default"):
         self.store = store or SQLiteEventStore()
         self.engine = engine or DetectionEngine()
         self.notifier = notifier or Notifier()
@@ -64,7 +68,8 @@ class SecurityService:
             from aegis.detection.ml_assist import MLAssist
             ml = MLAssist()
         self.ml = ml                      # MLAssist or None
-        self.collectors: list[Collector] = collectors or [
+        # An explicit empty list means "no collectors" (events are fed in by hand).
+        self.collectors: list[Collector] = collectors if collectors is not None else [
             NetworkCollector(), ProcessCollector(), FileIntegrityCollector(),
         ]
         self.auto_respond = auto_respond
@@ -77,6 +82,13 @@ class SecurityService:
         self._finding_listeners = []
         self._alert_listeners = []
         self._alerted: dict[tuple[str, str], datetime] = {}
+
+        #: Latest security-check report (attached to exported heartbeats).
+        self.latest_posture = None
+        #: Optional SENTINEL-X exporter; None unless export is enabled.
+        self.forwarder = _default_forwarder() if forwarder == "default" else forwarder
+        if self.forwarder is not None and getattr(self.forwarder, "posture_provider", None) is None:
+            self.forwarder.posture_provider = lambda: self.latest_posture
 
     # -- listeners (UI subscribes) ----------------------------------------- #
     def on_finding(self, fn) -> None:
@@ -98,6 +110,7 @@ class SecurityService:
                 log.info("Retention purge removed %d old rows.", removed)
         except Exception:  # noqa: BLE001
             log.exception("Retention purge failed")
+        self._restore_firewall_rules()
         for col in self.collectors:
             if not col.available():
                 log.warning("Collector '%s' unavailable; skipping.", col.name)
@@ -107,8 +120,28 @@ class SecurityService:
                                  name=f"collector-{col.name}", daemon=True)
             t.start()
             self._threads.append(t)
+        if self.forwarder is not None:
+            self.forwarder.start()
         self.audit("SYSTEM", "monitoring_started", Severity.INFO, "Live monitoring started.")
         log.info("SecurityService started with %d collectors.", len(self._threads))
+
+    def _restore_firewall_rules(self) -> None:
+        """Re-apply saved block rules on backends that lose them at reboot (nftables)."""
+        sync = getattr(self.firewall, "sync", None)
+        if sync is None:
+            return
+        from aegis.platforms import is_elevated
+
+        if not is_elevated():
+            return
+        try:
+            restored = sync()
+        except Exception:  # noqa: BLE001 - restoring rules must not stop monitoring
+            log.exception("Restoring saved firewall rules failed")
+            return
+        if restored:
+            self.audit("RULE", "rules_restored", Severity.INFO,
+                       f"Re-applied {restored} saved firewall rule(s).")
 
     def stop(self) -> None:
         self._running = False
@@ -128,6 +161,11 @@ class SecurityService:
         """Release resources on application shutdown (not on pause)."""
         if self._running:
             self.stop()
+        if self.forwarder is not None:
+            try:
+                self.forwarder.stop()
+            except Exception:  # noqa: BLE001 - shutdown must still close the store
+                log.exception("Stopping the SENTINEL-X exporter failed")
         self.store.close()
 
     @property
@@ -168,7 +206,7 @@ class SecurityService:
                     findings.append(ml_finding)
             for finding in findings:
                 _attach_program(finding, event)
-                self._handle_finding(finding)
+                self._handle_finding(finding, event)
             all_findings.extend(findings)
 
         with self._lock:
@@ -177,17 +215,18 @@ class SecurityService:
                 self.ml.maybe_train()
         return all_findings
 
-    def _handle_finding(self, finding: Finding) -> None:
+    def _handle_finding(self, finding: Finding, event: Event | None = None) -> None:
         self.store.save_finding(finding)
         for fn in list(self._finding_listeners):   # snapshot: listeners may be added concurrently
             _safe_call(fn, finding)
+        self._export(finding, source_event=event)
 
         threshold = settings.threat_score_alert_threshold
         if (finding.score >= threshold or finding.severity >= Severity.HIGH) \
                 and not is_trusted(finding.process_name, finding.parent_name,
                                    settings.trusted_programs) \
                 and self._first_alert_in_window(finding):
-            self._raise_alert(finding)
+            self._raise_alert(finding, event)
 
     def _first_alert_in_window(self, finding: Finding) -> bool:
         """One alert per rule and subject per dedup window; repeats stay as findings."""
@@ -203,7 +242,7 @@ class SecurityService:
                                  if finding.timestamp - t < window}
         return True
 
-    def _raise_alert(self, finding: Finding) -> None:
+    def _raise_alert(self, finding: Finding, event: Event | None = None) -> None:
         alert = Alert(
             title=finding.title,
             message=f"{finding.source_summary}\n{'; '.join(finding.reasons)}",
@@ -217,15 +256,34 @@ class SecurityService:
         alert.id = self.store.save_alert(alert)
         self.audit("DETECTION", "alert_raised", finding.severity,
                    finding.title, f"{finding.attack_ref} · {finding.entity}")
-        self.notifier.notify(alert, dedup_key=finding.entity or finding.rule_id)
+        notified = self.notifier.notify(alert, dedup_key=finding.entity or finding.rule_id)
+        response = "notified" if notified else "none"
 
         if self.auto_respond and self.responder.can_handle(finding):
             result = self.responder.respond(finding)
             self.audit("RESPONSE", "auto_block", Severity.MEDIUM,
                        f"Auto-block {finding.entity}", result.message)
+            if result.ok:
+                response = "blocked_host"
 
         for fn in list(self._alert_listeners):   # snapshot copy (thread-safe iteration)
             _safe_call(fn, alert)
+        self._export(alert, source_event=event, finding=finding, response_taken=response)
+
+    # -- security check ----------------------------------------------------- #
+    def record_posture(self, report) -> None:
+        """Remember the latest security-check result and export it if enabled."""
+        self.latest_posture = report
+        self._export(report)
+
+    # -- optional export ---------------------------------------------------- #
+    def _export(self, item, **options) -> None:
+        if self.forwarder is None:
+            return
+        try:
+            self.forwarder.submit(item, **options)
+        except Exception:  # noqa: BLE001 - export must never break detection
+            log.exception("Export of %s failed", type(item).__name__)
 
     # -- firewall passthrough (audited) ------------------------------------ #
     def create_rule(self, rule: FirewallRule):

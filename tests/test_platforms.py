@@ -34,13 +34,6 @@ def test_exactly_one_platform_is_current():
     assert sum(flags) <= 1, "platform predicates must be mutually exclusive"
 
 
-def test_posix_excludes_windows():
-    if platforms.is_windows():
-        assert platforms.is_posix() is False
-    elif platforms.is_linux() or platforms.is_macos():
-        assert platforms.is_posix() is True
-
-
 def test_privilege_hint_is_actionable():
     hint = platforms.privilege_hint()
     assert "Administrator" in hint or "sudo" in hint

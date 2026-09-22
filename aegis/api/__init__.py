@@ -1,5 +1,5 @@
-"""Optional thin API surface (FastAPI) decoupling the UI from the engine.
+"""Local web dashboard for this computer (``aegis serve``).
 
-Reserved for a later phase; enables a future distributed deployment where a UI
-or multiple hosts talk to the detection engine over a defined interface.
+Serves the same data as the desktop app on the loopback interface only, behind
+a per-run access token. It is a view of one endpoint, not a central server.
 """

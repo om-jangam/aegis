@@ -30,13 +30,3 @@ SEVERITY_COLOR = {
 def severity_color(name: str) -> str:
     return {"INFO": INFO, "LOW": OK, "MEDIUM": WARN, "HIGH": DANGER, "CRITICAL": CRIT}.get(
         name, INFO)
-
-
-def score_color(score: int) -> str:
-    if score >= 70:
-        return DANGER
-    if score >= 40:
-        return WARN
-    if score >= 20:
-        return "#eab308"
-    return OK

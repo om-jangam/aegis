@@ -1,9 +1,8 @@
 """Storage contract.
 
-Defines the persistence interface the rest of the app depends on. The concrete
-SQLite implementation is added in a later phase; keeping an interface here means
-the store can later be swapped (e.g. for OpenSearch in a distributed deployment)
-without touching callers.
+Defines the persistence interface the rest of the app depends on. Callers depend on
+this interface rather than on SQLite, which keeps the store easy to replace with
+an in-memory fake in tests.
 """
 from __future__ import annotations
 

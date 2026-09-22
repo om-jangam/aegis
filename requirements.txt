@@ -1,8 +1,0 @@
-# Runtime dependencies (pinned to the Flet 0.86 line).
-# For development tooling see requirements-dev.txt or `pip install -e .[dev]`.
-flet==0.86.*
-psutil>=7.0,<8
-win11toast>=0.35; sys_platform == "win32"
-scikit-learn>=1.5,<2
-numpy>=2.0,<3
-joblib>=1.3

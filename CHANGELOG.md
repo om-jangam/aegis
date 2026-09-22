@@ -15,6 +15,13 @@ All notable changes to Aegis are documented here. The format is based on
 - DNS telemetry, so threat intel can match malicious domains as well as IPs.
 
 ### Added
+- **Forwarding to SENTINEL-X** (off by default): findings, alerts,
+  security-check scores and a 60-second heartbeat are mapped to the shared
+  contract in `shared/event_schema.json`, queued durably in SQLite, and sent in
+  batches over HTTPS with bearer authentication, exponential backoff and
+  delete-only-after-2xx. Standard library only; command lines are redacted, and
+  API keys, the dashboard token and file contents are never sent. Configured in
+  `config.json`, `AEGIS_FORWARDING_API_KEY`, or `--forward-*` flags.
 - Desktop console **Security Check** page: posture score, every check with its
   fix, threat-intel status and a one-click "Update blocklists" button. Checks
   and downloads run in the background so the window stays responsive.

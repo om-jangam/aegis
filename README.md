@@ -94,7 +94,7 @@ Score 81/100 (grade B): 1 failed, 1 warnings, 6 passed, 0 skipped
 |---------|---------|
 | `aegis check [--json] [--fail-on high]` | Security posture audit with score and fixes |
 | `aegis serve [--monitor] [--port N]` | Web dashboard (optionally with live detection) |
-| `aegis monitor [--json] [--auto-respond]` | Headless detection; `--json` streams findings to a SIEM |
+| `aegis monitor [--json] [--auto-respond]` | Headless detection; `--json` prints one JSON finding per line |
 | `aegis report [-o file.html]` | Shareable HTML security report |
 | `aegis intel update` / `status` / `lookup <ip>` | Manage and query threat-intel blocklists |
 | `aegis block <ip> [--note ...]` | Contain a remote host (needs Administrator / root) |
@@ -190,14 +190,87 @@ aegis serve --monitor
   protection), responses carry a strict Content-Security-Policy, and all data
   is rendered as text, never HTML.
 
+## Forwarding to SENTINEL-X
+
+Aegis can optionally export its findings, alerts, security-check scores and a
+heartbeat to a **SENTINEL-X** server, a separate investigation project. Aegis works
+completely on its own; export is an integration, not a requirement.
+Forwarding is **off by default**; nothing is sent unless you turn it on.
+
+The event format is the shared contract in
+[`shared/event_schema.json`](shared/event_schema.json).
+
+**1. Configure** the `forwarding` section of `config.json` in the Aegis data
+folder (`%LOCALAPPDATA%\Aegis` on Windows, `~/.local/share/aegis` on Linux,
+`~/Library/Application Support/Aegis` on macOS):
+
+```json
+{
+  "forwarding": {
+    "enabled": true,
+    "server_url": "https://sentinel.example.com",
+    "batch_size": 50,
+    "flush_interval_seconds": 10,
+    "verify_tls": true,
+    "ingest_path": "/api/v1/ingest/events"
+  }
+}
+```
+
+**2. Give it the ingest token** from SENTINEL-X. Prefer an environment variable
+over storing the key in `config.json`:
+
+```bash
+# Windows PowerShell:  $env:AEGIS_FORWARDING_API_KEY = "<token>"
+export AEGIS_FORWARDING_API_KEY="<token>"
+```
+
+**3. Run** monitoring (or the desktop app):
+
+```bash
+aegis monitor
+# or override the config for one run:
+aegis monitor --forward-url https://sentinel.example.com --forward-batch-size 100
+aegis status        # shows whether forwarding is on and how many events are queued
+```
+
+| Option | Config key | Flag | Default |
+|--------|-----------|------|---------|
+| Turn forwarding on | `enabled` | `--forward` (or any `--forward-url`) | `false` |
+| Server address | `server_url` | `--forward-url` | none |
+| Ingest token | `api_key` | `--forward-api-key`, or `AEGIS_FORWARDING_API_KEY` | none |
+| Events per request | `batch_size` | `--forward-batch-size` | `50` |
+| Seconds between sends | `flush_interval_seconds` | `--forward-flush-interval` | `10` |
+| Check the server's TLS certificate | `verify_tls` | `--forward-insecure` turns it off | `true` |
+| Endpoint path | `ingest_path` | none | `/api/v1/ingest/events` |
+
+**How delivery works**
+- Events are written to a local queue (`forward_queue.db`) first, so nothing is
+  lost if the server is down or Aegis restarts. The queue holds up to 100,000
+  events and drops the oldest if an outage goes on longer than that.
+- Batches are sent as `POST {server_url}{ingest_path}` with
+  `Authorization: Bearer <token>` and the body `{"events": [...]}`.
+- Failed sends retry with exponential backoff (1 s, 2 s, 4 s, up to 5 minutes).
+  Events are removed from the queue only after a `2xx` response.
+- A heartbeat is sent every 60 seconds with the hostname, OS, Aegis version and
+  latest security score.
+- Only the Python standard library is used for HTTP.
+
+**What is never sent:** the API key, the dashboard token, file contents or raw
+collector records. Command lines are scanned for passwords, tokens and keys,
+which are replaced with `[REDACTED]`, then shortened to 1,024 characters.
+HTTPS is required (plain HTTP only for `localhost` testing), and redirects are
+never followed, so the token cannot be sent to another server.
+
 ## Privileges and privacy
 
 - **No admin needed** for `check`, `monitor`, `serve`, `report` and `intel`.
   Only *changing* the firewall (`block`, auto-response, rule edits) needs
   Administrator or root, and Aegis tells you which mode it is in.
-- **Local by default:** telemetry, findings and reports never leave the machine.
-  The one exception is `aegis intel update`, which downloads public blocklists
-  only when you run it.
+- **Local by default:** telemetry, findings and reports stay on the machine.
+  The exceptions are `aegis intel update`, which downloads public blocklists
+  only when you run it, and [forwarding to SENTINEL-X](#forwarding-to-sentinel-x),
+  which is off unless you enable it.
 - **Read-only checks:** `aegis check` inspects settings and never changes them.
 
 ## Security engineering
@@ -261,7 +334,6 @@ pyinstaller --noconfirm --windowed --name Aegis ^
 - **Sysmon / ETW collectors** for kernel-grade telemetry.
 - **DNS telemetry** so threat intel can match malicious domains.
 - **Locale-independent firewall** via the Windows COM API (`INetFwPolicy2`).
-- **Multi-host mode**: several agents reporting to one dashboard.
 
 ## Disclaimer
 

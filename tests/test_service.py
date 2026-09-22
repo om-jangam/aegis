@@ -7,7 +7,7 @@ from aegis.alerting.notifier import Notifier
 from aegis.core.events import Direction, EventSource, EventType, NetworkEvent
 from aegis.core.models import FirewallRule
 from aegis.response.firewall import FirewallManager, RunResult
-from aegis.service import SecurityService, severity_for
+from aegis.service import SecurityService
 from aegis.storage.database import SQLiteEventStore
 
 
@@ -32,13 +32,6 @@ def _svc(tmp_path):
     # collectors=[] because we feed events manually.
     return SecurityService(store=store, firewall=fw, ml=None, collectors=[],
                            notifier=_silent_notifier())
-
-
-def test_severity_mapping():
-    assert severity_for(95).value == "CRITICAL"
-    assert severity_for(75).value == "HIGH"
-    assert severity_for(50).value == "MEDIUM"
-    assert severity_for(10).value == "INFO"
 
 
 def test_pipeline_c2_event_raises_alert_and_audit(tmp_path):
@@ -121,4 +114,45 @@ def test_create_rule_is_audited(tmp_path):
     assert result.ok is True
     audit = svc.store.recent_audit(category="RULE")
     assert any(a.action == "rule_created" for a in audit)
+    svc.store.close()
+
+
+class SyncingFirewall(FirewallManager):
+    def __init__(self):
+        super().__init__(runner=RecordingRunner())
+        self.synced = 0
+
+    def sync(self):
+        self.synced += 1
+        return 2
+
+
+def test_start_restores_saved_rules_when_elevated(tmp_path, monkeypatch):
+    monkeypatch.setattr("aegis.platforms.is_elevated", lambda: True)
+    fw = SyncingFirewall()
+    svc = SecurityService(store=SQLiteEventStore(tmp_path / "s.db"), firewall=fw, ml=None,
+                          collectors=[], notifier=_silent_notifier(), forwarder=None)
+    svc.start()
+    svc.stop()
+    assert fw.synced == 1
+    assert any(a.action == "rules_restored" for a in svc.store.recent_audit(category="RULE"))
+    svc.store.close()
+
+
+def test_start_skips_rule_restore_without_privileges(tmp_path, monkeypatch):
+    monkeypatch.setattr("aegis.platforms.is_elevated", lambda: False)
+    fw = SyncingFirewall()
+    svc = SecurityService(store=SQLiteEventStore(tmp_path / "s.db"), firewall=fw, ml=None,
+                          collectors=[], notifier=_silent_notifier(), forwarder=None)
+    svc.start()
+    svc.stop()
+    assert fw.synced == 0
+    svc.store.close()
+
+
+def test_an_empty_collector_list_starts_no_collectors(tmp_path):
+    svc = SecurityService(store=SQLiteEventStore(tmp_path / "s.db"),
+                          firewall=FirewallManager(runner=RecordingRunner()), ml=None,
+                          collectors=[], notifier=_silent_notifier(), forwarder=None)
+    assert svc.collectors == []
     svc.store.close()
