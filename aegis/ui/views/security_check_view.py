@@ -1,4 +1,4 @@
-"""Security check view: posture score with fixes, plus threat-intel status."""
+"""Security check view: posture score, one-click hardening with undo, threat intel."""
 from __future__ import annotations
 
 import logging
@@ -21,6 +21,14 @@ _STATUS = {
     CheckStatus.SKIP: (ft.Icons.REMOVE_CIRCLE_OUTLINE, theme.TEXT_MUTED, "SKIP"),
 }
 _ORDER = {CheckStatus.FAIL: 0, CheckStatus.WARN: 1, CheckStatus.PASS: 2, CheckStatus.SKIP: 3}
+_OUTCOME_COLOR = {
+    "fixed": theme.OK, "undone": theme.INFO, "not_verified": theme.WARN,
+    "failed": theme.DANGER, "needs_admin": theme.DANGER,
+}
+_OUTCOME_LABEL = {
+    "fixed": "FIXED", "undone": "UNDONE", "not_verified": "NOT VERIFIED",
+    "failed": "FAILED", "needs_admin": "NEEDS ADMIN",
+}
 
 
 class SecurityCheckView(BaseView):
@@ -29,7 +37,9 @@ class SecurityCheckView(BaseView):
 
     def build(self) -> ft.Control:
         self._report = None
+        self._fixes: dict[str, list] = {}
         self._checking = False
+        self._fixing = False
         self._updating_intel = False
 
         self.score = ft.Text("-", size=40, weight=ft.FontWeight.BOLD, color=theme.TEXT)
@@ -60,15 +70,20 @@ class SecurityCheckView(BaseView):
         self.results = ft.ListView(spacing=8, expand=True, padding=4)
         self.results.controls = [c.empty_state("Running the security check...",
                                                ft.Icons.HEALTH_AND_SAFETY_OUTLINED)]
+        self.history = ft.ListView(spacing=6, height=120, padding=4)
         return ft.Column([
             ft.Row([score_panel, intel_panel], spacing=16),
-            ft.Text("Read-only checks of settings that make this machine easier to attack. "
-                    "Nothing is changed.", size=12, color=theme.TEXT_MUTED),
+            ft.Text("The check only reads settings. A fix changes a setting only after you "
+                    "confirm, is verified afterwards, and can be undone below.",
+                    size=12, color=theme.TEXT_MUTED),
             c.panel(self.results, padding=6, expand=True),
+            c.panel(ft.Column([c.section_title("Fix history", ft.Icons.HISTORY), self.history],
+                              spacing=6, tight=True), padding=10),
         ], spacing=12, expand=True)
 
     def refresh(self) -> None:
         self._show_intel()
+        self._show_history()
         if self._report is None and not self._checking:
             self.run_check()
         else:
@@ -90,6 +105,12 @@ class SecurityCheckView(BaseView):
             self.app.toast("The security check could not run.", ok=False)
         else:
             self._report = report
+            try:
+                recommendations = self.service.hardening.recommendations(report)
+            except Exception:  # noqa: BLE001 - fixes are optional; the report still shows
+                log.exception("Could not work out the available fixes")
+                recommendations = []
+            self._fixes = {rec.check.check_id: rec.fixes for rec in recommendations}
             self._render(report)
             self.app.posture_updated(report)
         finally:
@@ -121,8 +142,7 @@ class SecurityCheckView(BaseView):
         self.results.controls = [self._row(r) for r in ordered] or [
             c.empty_state("No checks apply to this platform.")]
 
-    @staticmethod
-    def _row(result) -> ft.Control:
+    def _row(self, result) -> ft.Control:
         icon, color, label = _STATUS[result.status]
         lines: list[ft.Control] = [
             ft.Row([
@@ -142,10 +162,121 @@ class SecurityCheckView(BaseView):
                         selectable=True),
                 bgcolor=ft.Colors.with_opacity(0.12, color), border_radius=8,
                 padding=ft.Padding.symmetric(horizontal=10, vertical=8)))
+        buttons: list[ft.Control] = [
+            ft.OutlinedButton(fix.title, icon=ft.Icons.BUILD_OUTLINED,
+                              on_click=lambda e, f=fix, ch=changes: self._confirm_fix(f, ch))
+            for fix, changes in self._fixes.get(result.check_id, [])]
+        if buttons:
+            lines.append(ft.Row(buttons, spacing=8, wrap=True))
         return ft.Container(
             content=ft.Column(lines, spacing=4, tight=True),
             padding=ft.Padding.symmetric(horizontal=14, vertical=12),
             bgcolor=theme.SURFACE_ALT, border_radius=10, border=ft.Border.all(1, theme.BORDER))
+
+    # -- hardening ---------------------------------------------------------- #
+    def _confirm_fix(self, fix, changes) -> None:
+        elevated = self.service.hardening.ctx.elevated
+        body: list[ft.Control] = [
+            ft.Text("Why this matters", size=12, color=theme.TEXT_MUTED),
+            ft.Text(fix.risk, size=13, color=theme.TEXT),
+            ft.Text("What will change", size=12, color=theme.TEXT_MUTED),
+            *(ft.Text(f"{ch.setting}\n    {ch.current}  ->  {ch.target}", size=12,
+                      color=theme.TEXT, selectable=True) for ch in changes),
+            ft.Text("Afterwards", size=12, color=theme.TEXT_MUTED),
+            ft.Text(fix.effect, size=13, color=theme.TEXT),
+        ]
+        if fix.restart_note:
+            body.append(ft.Text(fix.restart_note, size=12, color=theme.WARN))
+        body.append(ft.Text(
+            "The current settings are saved first, so you can undo this from Fix history."
+            if fix.reversible else
+            "Undo is available, but part of this change cannot be restored (see above).",
+            size=12, color=theme.TEXT_MUTED))
+        if fix.requires_admin and not elevated:
+            body.append(ft.Text("This change needs administrator rights. Restart Aegis as "
+                                "administrator to apply it.", size=12, color=theme.DANGER))
+
+        def apply(e):
+            self.page.pop_dialog()
+            self._run_fix(lambda: self.service.hardening.apply(fix.fix_id, confirmed=True))
+
+        self.page.show_dialog(ft.AlertDialog(
+            modal=True, title=ft.Text(fix.title),
+            content=ft.Container(ft.Column(body, spacing=6, tight=True,
+                                           scroll=ft.ScrollMode.AUTO), width=520),
+            actions=[ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog()),
+                     ft.FilledButton("Apply fix", icon=ft.Icons.BUILD,
+                                     disabled=fix.requires_admin and not elevated,
+                                     on_click=apply)]))
+
+    def _confirm_undo(self, record) -> None:
+        def undo(e):
+            self.page.pop_dialog()
+            self._run_fix(lambda: self.service.hardening.undo(record.id, confirmed=True))
+
+        lines = [ft.Text(f"{ch['setting']}\n    {ch['target']}  ->  {ch['current']}", size=12,
+                         color=theme.TEXT, selectable=True) for ch in record.changes]
+        fix = self.service.hardening.fix(record.fix_id)
+        blocked = bool(fix and fix.requires_admin and not self.service.hardening.ctx.elevated)
+        if blocked:
+            lines.append(ft.Text("Undoing this needs administrator rights. Restart Aegis as "
+                                 "administrator to undo it.", size=12, color=theme.DANGER))
+        self.page.show_dialog(ft.AlertDialog(
+            modal=True, title=ft.Text(f"Undo: {record.title}?"),
+            content=ft.Container(ft.Column(
+                [ft.Text("The settings from before the fix will be put back:", size=13,
+                         color=theme.TEXT), *lines], spacing=6, tight=True), width=520),
+            actions=[ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog()),
+                     ft.FilledButton("Undo", icon=ft.Icons.UNDO, disabled=blocked,
+                                     on_click=undo)]))
+
+    def _run_fix(self, action) -> None:
+        if self._fixing:
+            return
+        self._fixing = True
+
+        def worker():
+            try:
+                result = action()
+                self.app.toast(f"{result.title}: {result.message}", ok=result.ok)
+            except Exception:  # noqa: BLE001
+                log.exception("Hardening action failed")
+                self.app.toast("The change could not be made.", ok=False)
+            finally:
+                self._fixing = False
+                self._show_history()
+                self.run_check()
+
+        self.page.run_thread(worker)
+
+    def _show_history(self) -> None:
+        try:
+            records = self.service.hardening.history(30)
+        except Exception:  # noqa: BLE001
+            log.exception("Could not read the fix history")
+            records = []
+        self.history.controls = [self._history_row(r) for r in records] or [
+            ft.Text("No fixes applied yet.", size=12, color=theme.TEXT_MUTED)]
+        self.safe_update()
+
+    def _history_row(self, record) -> ft.Control:
+        color = _OUTCOME_COLOR.get(record.status, theme.TEXT_MUTED)
+        label = _OUTCOME_LABEL.get(record.status, record.status.upper())
+        what = record.title if record.action == "apply" else f"Undo: {record.title}"
+        if record.undone_at:
+            what += " (undone)"
+        row: list[ft.Control] = [
+            ft.Text(record.timestamp.strftime("%d %b %H:%M"), size=11, color=theme.TEXT_MUTED,
+                    width=90),
+            c.pill(label, color),
+            ft.Column([ft.Text(what, size=12, color=theme.TEXT, weight=ft.FontWeight.W_600),
+                       ft.Text(record.message, size=11, color=theme.TEXT_MUTED)],
+                      spacing=1, tight=True, expand=True),
+        ]
+        if record.can_undo:
+            row.append(ft.TextButton("Undo", icon=ft.Icons.UNDO,
+                                     on_click=lambda e, r=record: self._confirm_undo(r)))
+        return ft.Row(row, spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
     # -- threat intel ------------------------------------------------------- #
     def _show_intel(self) -> None:

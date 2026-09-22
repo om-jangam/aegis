@@ -78,6 +78,7 @@ Score 81/100 (grade B): 1 failed, 1 warnings, 6 passed, 0 skipped
 | Area | What it does |
 |------|--------------|
 | ✅ **Security posture audit** | `aegis check`: 12 read-only checks (firewall, exposed services, OS updates, suspicious startup programs, antivirus, UAC, RDP/NLA, SMBv1, auto-logon, disk encryption, SSH hardening, file permissions), scored 0-100 with a fix for each failure |
+| 🛠️ **Safe hardening** | `aegis harden` and a **Fix** button on the Security Check page: explains the risk, shows exactly what will change, asks first, saves the old settings, applies, verifies and records the fix, with **Undo** |
 | 🌐 **Threat intelligence** | Flags connections to known botnet C2 and criminal networks (abuse.ch Feodo, Emerging Threats, Spamhaus DROP, or your own lists), even on port 443 |
 | 🧠 **Detection engine** | Explainable Python rules plus Sigma rules, all mapped to **MITRE ATT&CK**; every finding carries its technique, score and reasons |
 | 🗣️ **Plain-language guidance** | Every detected technique comes with "what this means and what to do" |
@@ -93,6 +94,7 @@ Score 81/100 (grade B): 1 failed, 1 warnings, 6 passed, 0 skipped
 | Command | Purpose |
 |---------|---------|
 | `aegis check [--json] [--fail-on high]` | Security posture audit with score and fixes |
+| `aegis harden` / `apply <FIX-ID> [--dry-run] [--yes]` / `undo <N>` / `history` | Fix weaknesses the check found, with confirmation, verification and undo |
 | `aegis serve [--monitor] [--port N]` | Web dashboard (optionally with live detection) |
 | `aegis monitor [--json] [--auto-respond]` | Headless detection; `--json` prints one JSON finding per line |
 | `aegis report [-o file.html]` | Shareable HTML security report |
@@ -141,6 +143,45 @@ One normalized `Event` type decouples collectors from detection, so new telemetr
 or new rules plug in without touching the rest. Posture checks read the system
 through an injectable context, so every check is unit-tested on every OS.
 Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Hardening
+
+The security check tells you what is weak; hardening fixes it, one confirmed step at a time.
+
+```bash
+aegis harden                          # weaknesses and the fixes available here
+aegis harden apply FIX-WIN-SMB1 --dry-run   # show exactly what would change
+aegis harden apply FIX-WIN-SMB1       # explain, ask, back up, apply, verify, record
+aegis harden history                  # every fix and undo
+aegis harden undo 3                   # put the old settings back
+```
+
+Every fix goes through the same steps, enforced in one place
+(`aegis/hardening/engine.py`), so no fix can skip a safeguard:
+
+1. **Explain**: why the weakness matters and what you will notice afterwards.
+2. **Confirm**: nothing changes until you click *Apply fix* or type `y`
+   (`--yes` for scripts). Changes needing Administrator/root are refused up front.
+3. **Back up**: the current settings are saved before anything changes.
+4. **Apply**: if a step fails, the backup is restored automatically.
+5. **Verify**: the setting is read again; the result says *fixed* or *not verified*.
+6. **Record**: every attempt is kept in the fix history and the audit trail, with **Undo**.
+
+| Fix | Platform | What it changes |
+|-----|----------|-----------------|
+| `FIX-WIN-FIREWALL` | Windows | Turns Windows Firewall on for profiles that are off |
+| `FIX-WIN-SMB1` | Windows | Turns off the SMBv1 server (restart to finish) |
+| `FIX-WIN-RDP-NLA` | Windows | Requires sign-in before a Remote Desktop session (NLA) |
+| `FIX-WIN-RDP-OFF` | Windows | Turns Remote Desktop off |
+| `FIX-WIN-UAC` | Windows | Restores User Account Control to the default level |
+| `FIX-WIN-AUTOLOGON` | Windows | Turns off automatic sign-in and deletes the plaintext password (never read or kept by Aegis, so undo cannot restore it) |
+| `FIX-MAC-FIREWALL` | macOS | Turns the application firewall on |
+| `FIX-LINUX-UFW` | Linux | Enables ufw, allowing SSH first if an SSH server is running |
+| `FIX-SSH-LOGIN` | Linux, macOS | Stops root and empty-password SSH logins; validated with `sshd -t` and rolled back if rejected |
+| `FIX-FILE-PERMISSIONS` | Linux, macOS | Removes world-writable/readable bits from account and privilege files |
+
+Changes that need judgement, such as encrypting a disk, installing updates,
+stopping a service or switching SSH to keys only, stay as written guidance.
 
 ## MITRE ATT&CK coverage
 

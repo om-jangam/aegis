@@ -18,7 +18,7 @@ from pathlib import Path
 
 from aegis.config import DB_PATH
 from aegis.core.events import Event, EventType, NetworkEvent, ProcessEvent
-from aegis.core.models import Alert, AuditEvent, Finding, Severity
+from aegis.core.models import Alert, AuditEvent, Finding, Remediation, Severity
 from aegis.storage.base import EventStore
 
 _SCHEMA = """
@@ -83,6 +83,22 @@ CREATE TABLE IF NOT EXISTS audit (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_cat ON audit(category);
+
+CREATE TABLE IF NOT EXISTS remediations (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts        TEXT NOT NULL,
+    fix_id    TEXT NOT NULL,
+    check_id  TEXT NOT NULL,
+    title     TEXT,
+    action    TEXT NOT NULL,
+    status    TEXT NOT NULL,
+    message   TEXT,
+    changes   TEXT,
+    backup    TEXT,
+    undo_of   INTEGER,
+    undone_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_remediations_ts ON remediations(ts);
 """
 
 # Columns added after the first release. ``CREATE TABLE IF NOT EXISTS`` leaves an
@@ -226,6 +242,37 @@ class SQLiteEventStore(EventStore):
             rows = self._conn.execute(sql, params).fetchall()
         return [self._row_to_audit(r) for r in rows]
 
+    # -- hardening history -------------------------------------------------- #
+    def save_remediation(self, rec: Remediation) -> int:
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO remediations (ts, fix_id, check_id, title, action, status, message,"
+                " changes, backup, undo_of) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (rec.timestamp.isoformat(timespec="seconds"), rec.fix_id, rec.check_id,
+                 rec.title, rec.action, rec.status, rec.message, json.dumps(rec.changes),
+                 json.dumps(rec.backup), rec.undo_of),
+            )
+            self._conn.commit()
+            return cur.lastrowid
+
+    def remediation(self, remediation_id: int) -> Remediation | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM remediations WHERE id = ?",
+                                     (remediation_id,)).fetchone()
+        return self._row_to_remediation(row) if row else None
+
+    def recent_remediations(self, limit: int = 100) -> list[Remediation]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM remediations ORDER BY id DESC LIMIT ?",
+                                      (limit,)).fetchall()
+        return [self._row_to_remediation(r) for r in rows]
+
+    def mark_remediation_undone(self, remediation_id: int, when: datetime) -> None:
+        with self._lock:
+            self._conn.execute("UPDATE remediations SET undone_at = ? WHERE id = ?",
+                               (when.isoformat(timespec="seconds"), remediation_id))
+            self._conn.commit()
+
     # -- analytics (for the dashboard) -------------------------------------- #
     def stats(self) -> dict:
         with self._lock:
@@ -306,4 +353,14 @@ class SQLiteEventStore(EventStore):
             id=r["id"], category=r["category"], action=r["action"],
             severity=Severity(r["severity"]), message=r["message"] or "",
             detail=r["detail"] or "", actor=r["actor"] or "aegis",
+            timestamp=datetime.fromisoformat(r["ts"]))
+
+    @staticmethod
+    def _row_to_remediation(r: sqlite3.Row) -> Remediation:
+        return Remediation(
+            id=r["id"], fix_id=r["fix_id"], check_id=r["check_id"], title=r["title"] or "",
+            action=r["action"], status=r["status"], message=r["message"] or "",
+            changes=json.loads(r["changes"] or "[]"), backup=json.loads(r["backup"] or "{}"),
+            undo_of=r["undo_of"],
+            undone_at=datetime.fromisoformat(r["undone_at"]) if r["undone_at"] else None,
             timestamp=datetime.fromisoformat(r["ts"]))

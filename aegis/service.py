@@ -85,10 +85,20 @@ class SecurityService:
 
         #: Latest security-check report (attached to exported heartbeats).
         self.latest_posture = None
+        self._hardening = None
         #: Optional SENTINEL-X exporter; None unless export is enabled.
         self.forwarder = _default_forwarder() if forwarder == "default" else forwarder
         if self.forwarder is not None and getattr(self.forwarder, "posture_provider", None) is None:
             self.forwarder.posture_provider = lambda: self.latest_posture
+
+    @property
+    def hardening(self):
+        """The hardening engine, sharing this service's store and audit trail."""
+        if self._hardening is None:
+            from aegis.hardening import HardeningEngine
+
+            self._hardening = HardeningEngine(self.store)
+        return self._hardening
 
     # -- listeners (UI subscribes) ----------------------------------------- #
     def on_finding(self, fn) -> None:

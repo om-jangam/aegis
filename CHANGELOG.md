@@ -15,6 +15,14 @@ All notable changes to Aegis are documented here. The format is based on
 - DNS telemetry, so threat intel can match malicious domains as well as IPs.
 
 ### Added
+- **Safe hardening** (`aegis harden`, and a *Fix* button plus *Fix history* with
+  *Undo* on the Security Check page). Every fix explains the risk, shows the exact
+  change, requires confirmation, refuses up front without Administrator/root,
+  backs up the current settings, rolls back if a step fails, re-reads the
+  setting to verify, and records the attempt in a new `remediations` table and
+  the audit trail. Ten fixes across Windows, Linux and macOS (firewall, SMBv1,
+  RDP NLA / off, UAC, auto-logon, ufw, SSH root/empty-password logins, sensitive
+  file permissions).
 - **Forwarding to SENTINEL-X** (off by default): findings, alerts,
   security-check scores and a 60-second heartbeat are mapped to the shared
   contract in `shared/event_schema.json`, queued durably in SQLite, and sent in

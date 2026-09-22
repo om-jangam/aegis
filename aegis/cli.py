@@ -14,6 +14,8 @@ Commands
 ``aegis status``    report platform, firewall backend and privileges
 ``aegis rules``     list the firewall rules Aegis manages
 ``aegis block``     contain a remote host
+``aegis check``     audit this computer's security settings
+``aegis harden``    safely fix what the check found, with undo
 ``aegis console``   launch the desktop UI (default)
 """
 from __future__ import annotations
@@ -357,6 +359,153 @@ def cmd_check(args) -> int:
     return 1 if failing else 0
 
 
+def _hardening_engine():
+    """The hardening engine on the default store (replaced in tests)."""
+    from aegis.hardening import HardeningEngine
+    from aegis.storage.database import SQLiteEventStore
+
+    return HardeningEngine(SQLiteEventStore())
+
+
+def _print_changes(changes) -> None:
+    for change in changes:
+        print(f"    - {change.setting}: {change.current} -> {change.target}")
+
+
+def _confirmed(args, question: str) -> bool:
+    if args.yes:
+        return True
+    if not sys.stdin.isatty():
+        print("Refusing to change settings without confirmation; add --yes to confirm.",
+              file=sys.stderr)
+        return False
+    try:
+        return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
+def _harden_history(engine, args) -> int:
+    records = engine.history(args.limit)
+    if args.json:
+        print(json.dumps([{
+            "id": r.id, "time": r.timestamp.isoformat(timespec="seconds"),
+            "fix_id": r.fix_id, "title": r.title, "action": r.action,
+            "status": r.status, "message": r.message, "changes": r.changes,
+            "undone": r.undone_at is not None, "can_undo": r.can_undo,
+        } for r in records], indent=2))
+        return 0
+    if not records:
+        print("No hardening changes have been made yet.")
+        return 0
+    for r in records:
+        undo = f"  (undo: aegis harden undo {r.id})" if r.can_undo else ""
+        undone = "  [undone]" if r.undone_at else ""
+        print(f"#{r.id:<4} {r.timestamp:%Y-%m-%d %H:%M}  {r.action:<5} "
+              f"{r.status:<18} {r.title}{undone}{undo}")
+        if r.message:
+            print(f"       {r.message}")
+    return 0
+
+
+def _harden_apply(engine, args) -> int:
+    from aegis.hardening import Outcome
+
+    fix = engine.fix(args.fix_id)
+    if fix is None:
+        print(f"Unknown fix {args.fix_id!r} for this computer. "
+              f"Run 'aegis harden' to see the available fixes.", file=sys.stderr)
+        return 2
+    preview = engine.preview(fix.fix_id)
+    print(f"{fix.title}\n")
+    print(f"  Why: {fix.risk}")
+    print(f"  After the change: {fix.effect}")
+    if fix.restart_note:
+        print(f"  Note: {fix.restart_note}")
+    if preview.outcome is not Outcome.PREVIEW:
+        print(f"\n  {preview.message}")
+        return 0 if preview.ok else 1
+    print("\n  What will change:")
+    _print_changes(preview.changes)
+    if args.dry_run:
+        print("\nDry run: nothing was changed.")
+        return 0
+    if not _confirmed(args, "\nApply this change?"):
+        print("Cancelled. Nothing was changed.")
+        return 1
+    result = engine.apply(fix.fix_id, confirmed=True)
+    where = f" (record #{result.record_id})" if result.record_id else ""
+    print(f"\n{result.outcome.value.upper()}: {result.message}{where}")
+    if result.outcome in (Outcome.FIXED, Outcome.NOT_VERIFIED):
+        print(f"Undo with: aegis harden undo {result.record_id}")
+    return 0 if result.ok else 1
+
+
+def _harden_undo(engine, args) -> int:
+    from aegis.hardening import Outcome
+
+    try:
+        result = engine.undo(args.record_id)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    if result.outcome is not Outcome.NEEDS_CONFIRMATION:
+        print(result.message, file=sys.stderr)
+        return 1
+    print(f"Undo: {result.title}")
+    _print_changes(result.changes)
+    if not _confirmed(args, "Put the previous settings back?"):
+        print("Cancelled. Nothing was changed.")
+        return 1
+    result = engine.undo(args.record_id, confirmed=True)
+    print(f"{result.outcome.value.upper()}: {result.message}")
+    return 0 if result.ok else 1
+
+
+def _harden_list(engine, args) -> int:
+    from aegis.posture import run_posture_checks
+
+    report = run_posture_checks(engine.ctx)
+    recommendations = engine.recommendations(report)
+    if args.json:
+        print(json.dumps([{
+            "check": rec.check.to_dict(),
+            "fixes": [{**fix.describe(), "changes": [c.to_dict() for c in changes]}
+                      for fix, changes in rec.fixes],
+            "guidance": rec.guidance,
+        } for rec in recommendations], indent=2))
+        return 0
+    if not recommendations:
+        print(f"No weaknesses found (score {report.score}/100). Nothing to harden.")
+        return 0
+    automatic = 0
+    for rec in recommendations:
+        print(f"[{rec.check.status.value.upper()}] {rec.check.title}")
+        print(f"       {rec.check.summary}")
+        for fix, changes in rec.fixes:
+            automatic += 1
+            admin = " (needs admin)" if fix.requires_admin else ""
+            print(f"   Fix {fix.fix_id}: {fix.title}{admin}")
+            _print_changes(changes)
+        if not rec.fixes and rec.guidance:
+            print(f"   Manual: {rec.guidance}")
+        print()
+    if automatic:
+        print("Apply a fix with: aegis harden apply <FIX-ID>  (shows the change and asks first)")
+    return 0
+
+
+def cmd_harden(args) -> int:
+    """Fix the weaknesses the security check found: explain, confirm, apply, verify, record."""
+    handlers = {"history": _harden_history, "apply": _harden_apply, "undo": _harden_undo}
+    engine = _hardening_engine()
+    try:
+        action = getattr(args, "harden_command", None) or "list"
+        return handlers.get(action, _harden_list)(engine, args)
+    finally:
+        engine.store.close()
+
+
 def cmd_intel(args) -> int:
     """Manage and query threat-intelligence blocklists."""
     import ipaddress
@@ -611,6 +760,27 @@ def build_parser() -> argparse.ArgumentParser:
                          help="exit 1 if any check at or above this severity fails "
                               "(for scripts and CI)")
     p_check.set_defaults(func=cmd_check)
+
+    p_harden = sub.add_parser(
+        "harden", help="safely fix weaknesses the security check found",
+        description="List fixes for failed checks, apply one after confirmation, verify it, "
+                    "and record it so it can be undone.")
+    p_harden.add_argument("--json", action="store_true", help="machine-readable output")
+    harden_sub = p_harden.add_subparsers(dest="harden_command", metavar="ACTION")
+    p_list = harden_sub.add_parser("list", help="show weaknesses and the available fixes (default)")
+    p_list.add_argument("--json", action="store_true", help="machine-readable output")
+    p_apply = harden_sub.add_parser("apply", help="apply one fix after confirmation")
+    p_apply.add_argument("fix_id", help="the fix to apply, e.g. FIX-WIN-SMB1")
+    p_apply.add_argument("--dry-run", action="store_true",
+                         help="show what would change without changing anything")
+    p_apply.add_argument("--yes", action="store_true", help="confirm without asking")
+    p_undo = harden_sub.add_parser("undo", help="put back the settings from before a fix")
+    p_undo.add_argument("record_id", type=int, help="the history record number")
+    p_undo.add_argument("--yes", action="store_true", help="confirm without asking")
+    p_history = harden_sub.add_parser("history", help="list every fix and undo")
+    p_history.add_argument("--limit", type=int, default=50)
+    p_history.add_argument("--json", action="store_true", help="machine-readable output")
+    p_harden.set_defaults(func=cmd_harden)
 
     p_intel = sub.add_parser("intel", help="manage threat-intelligence blocklists")
     p_intel.set_defaults(func=cmd_intel, intel_command=None, json=False)

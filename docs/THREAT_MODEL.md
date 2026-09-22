@@ -108,8 +108,11 @@ is measured, not assumed.
 | **Tampering** | Injected `netsh` command via a crafted rule name | **No `shell=True`; argument-list execution**; forbidden-character rejection. Regression-tested (validator + firewall injection suites) |
 | **Tampering** | Poisoned ML model file executes on load | Model treated as untrusted; load is guarded and failure-safe; documented residual risk (§8) |
 | **Repudiation** | "I didn't change that rule" | Every rule change / response is written to the **audit log** with timestamp + actor |
-| **Information disclosure** | Telemetry leaks off-host | **No network egress by design**; data stays in local SQLite; secrets never logged |
+| **Information disclosure** | Telemetry leaks off-host | No network egress unless the user downloads blocklists or enables the SENTINEL-X export; data stays in local SQLite; secrets never logged |
+| **Information disclosure** | A hardening backup leaks a secret | Fixes never read out, display or back up secret values: the auto-logon fix records only that a password existed before deleting it |
 | **Denial of service** | Monitor thread crashes the app | Collectors/monitors wrap work in guarded loops; a failure logs and continues, never kills the app |
+| **Tampering** | A fix leaves the machine half-changed or unbootable | One engine enforces confirm → privilege check → backup → apply → verify for every fix; a failed step restores the backup; SSH changes are validated with `sshd -t` before reload; only reversible, low-blast-radius settings are automated |
+| **Repudiation** | "Aegis changed my settings" | Every fix and undo, including refusals and failures, is recorded in the fix history and the audit trail with the exact before/after values |
 | **Elevation of privilege** | Tool tricked into misusing admin rights | Least privilege: **read-only views need no admin**; only rule *changes* require it, and Aegis detects/report its own privilege level |
 
 ## 7. Key security controls (summary)
@@ -117,11 +120,12 @@ is measured, not assumed.
 1. **Input validation everywhere** — anti-injection, anti-corruption. First line of defence.
 2. **No shell execution** — subprocess called with argument lists (`shell=False`).
 3. **Least privilege** — monitoring/reading works unprivileged; elevation only for rule mutation.
-4. **No external communication** — zero telemetry/network egress; verified by audit.
+4. **No external communication by default** — no telemetry; the only egress is a blocklist download the user asks for and the opt-in SENTINEL-X export.
 5. **Append-only audit trail** — accountability for every privileged action.
-6. **Fail-safe monitoring** — a subsystem error degrades gracefully, never crashes the host tool.
-7. **Explainable detections** — every alert carries its rule, ATT&CK mapping, and reasons (no black boxes).
-8. **Defensive dependencies** — small, well-known libraries; runtime data git-ignored so it can't leak into the repo.
+6. **Consent and undo for hardening** — no setting changes without explicit confirmation; every fix is backed up, verified and reversible.
+7. **Fail-safe monitoring** — a subsystem error degrades gracefully, never crashes the host tool.
+8. **Explainable detections** — every alert carries its rule, ATT&CK mapping, and reasons (no black boxes).
+9. **Defensive dependencies** — small, well-known libraries; runtime data git-ignored so it can't leak into the repo.
 
 ## 8. Out of scope & residual risks (honest limits)
 

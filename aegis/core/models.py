@@ -160,3 +160,34 @@ class AuditEvent:
     actor: str = "aegis"
     timestamp: datetime = field(default_factory=datetime.now)
     id: int | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Hardening side
+# --------------------------------------------------------------------------- #
+@dataclass
+class Remediation:
+    """One hardening action: a fix applied to this computer, or the undo of one.
+
+    ``backup`` holds the settings as they were before the fix so it can be
+    undone. It never contains secrets: a fix that removes a stored password
+    records only that it was present.
+    """
+
+    fix_id: str
+    check_id: str
+    title: str
+    action: str                  # "apply" | "undo"
+    status: str                  # see aegis.hardening.Outcome
+    message: str = ""
+    changes: list[dict] = field(default_factory=list)
+    backup: dict = field(default_factory=dict)
+    undo_of: int | None = None
+    undone_at: datetime | None = None
+    timestamp: datetime = field(default_factory=datetime.now)
+    id: int | None = None
+
+    @property
+    def can_undo(self) -> bool:
+        return (self.action == "apply" and self.undone_at is None
+                and self.status in ("fixed", "not_verified"))

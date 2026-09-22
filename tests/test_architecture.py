@@ -11,7 +11,7 @@ import pytest
 
 PACKAGE = Path(__file__).resolve().parent.parent / "aegis"
 
-ENGINE = ["core", "collectors", "detection", "posture", "response", "storage",
+ENGINE = ["core", "collectors", "detection", "posture", "hardening", "response", "storage",
           "alerting", "intel"]
 FRONT_ENDS = ("aegis.ui", "aegis.api", "aegis.cli", "aegis.service", "aegis.forwarding")
 

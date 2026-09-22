@@ -26,15 +26,16 @@ source-agnostic data type, the normalized **`Event`**:
  └────────────────┘     └─────────────────┘     └──────────────────────┘
 
  Security check (posture):  checks ──► PostureReport ──► score, weaknesses, advice
+ Hardening:  weakness ─► explain ─► confirm ─► back up ─► apply ─► verify ─► record (undo)
 ```
 
 Collectors depend only on the `Event` contract, so a new telemetry source needs
 no detection changes and a new detection needs no collector changes.
 
 **Principles**
-- **Layering.** The engine (core, collectors, detection, posture, response,
-  storage, alerting, intel) never imports a front end (UI, dashboard, CLI) or
-  the export package. `tests/test_architecture.py` enforces this.
+- **Layering.** The engine (core, collectors, detection, posture, hardening,
+  response, storage, alerting, intel) never imports a front end (UI, dashboard,
+  CLI) or the export package. `tests/test_architecture.py` enforces this.
 - **Dependency inversion.** The pipeline depends on `Collector`,
   `DetectionRule`, `PostureCheck`, `FirewallBackend` and `EventStore`, never on
   concrete classes.
@@ -42,8 +43,10 @@ no detection changes and a new detection needs no collector changes.
   monitoring tool must never crash the host it protects.
 - **Explainable.** Every finding carries its rule, MITRE ATT&CK mapping,
   reasons and plain-language guidance.
-- **Every action is recorded.** Rule changes, blocks and detections are written
-  to the audit trail.
+- **Every action is recorded.** Rule changes, blocks, fixes, undos and
+  detections are written to the audit trail.
+- **No change without consent.** A setting is changed only after the person
+  confirms, and every fix can be undone from its saved backup.
 
 ## 2. System context
 
@@ -82,15 +85,16 @@ to SENTINEL-X when the user enables it.
 | `detection/ml_assist.py` | IsolationForest anomaly assist (evaluated in `docs/ML_EVALUATION.md`). |
 | `detection/trust.py`, `guidance.py` | Programs the user trusts; plain-language "what to do" advice per technique. |
 | `posture/` | The security check: firewall, exposed services, updates, startup programs, Defender, UAC, RDP, SMBv1, auto-logon, disk encryption, SSH, sensitive file permissions. Produces a scored `PostureReport`. |
+| `hardening/` | Safe fixes for weaknesses the check finds. `HardeningEngine` enforces confirm → admin check → backup → apply (rollback on failure) → verify → record for every `Fix`; history lives in the `remediations` table with undo. |
 | `intel/` | Local threat-intel blocklists (IPs and CIDR ranges) and the feed downloader. |
 | `response/` | `FirewallBackend` contract with Windows (`netsh`), Linux (`nftables`) and macOS (`pf` anchor) engines; argument-list execution, never a shell. `NullFirewall` when no backend is usable. |
-| `storage/` | `EventStore` contract and its SQLite (WAL) implementation for events, findings, alerts and audit. |
+| `storage/` | `EventStore` contract and its SQLite (WAL) implementation for events, findings, alerts, audit and fix history. |
 | `alerting/notifier.py` | Desktop notifications with cooldown de-duplication. |
 | `service.py` | Orchestrator: collectors → engine → store / alert / response, the single façade the front ends use. |
 | `ui/` | Flet desktop app: dashboard, security check, connections, processes, detections, rules, audit, settings. |
 | `api/` | Local web dashboard (`aegis serve`): loopback only, token, Host allow-list, strict CSP. A view of this one computer. |
 | `reporting.py` | Self-contained, escaped HTML security report (`aegis report`). |
-| `cli.py` | `status`, `monitor`, `check`, `sigma`, `intel`, `serve`, `report`, `rules`, `block`, `console`. |
+| `cli.py` | `status`, `monitor`, `check`, `harden`, `sigma`, `intel`, `serve`, `report`, `rules`, `block`, `console`. |
 | `forwarding/` | **Optional** export to SENTINEL-X: shared-schema mapping, SQLite outbox, HTTPS sender with backoff, heartbeat. Off by default. |
 | `config.py`, `platforms.py`, `logging_config.py` | Settings (JSON), OS and privilege detection, rotating logs. |
 
@@ -109,6 +113,13 @@ class DetectionRule(ABC):
 class PostureCheck(ABC):
     check_id: str
     def run(self, ctx: PostureContext) -> CheckResult: ...
+
+class Fix(ABC):
+    fix_id: str; check_id: str; risk: str; effect: str; requires_admin: bool
+    def plan(self, ctx: HardeningContext) -> list[Change]: ...   # empty = already safe
+    def snapshot(self, ctx) -> dict: ...                          # backup, never secrets
+    def apply(self, ctx) -> str: ...
+    def restore(self, ctx, backup: dict) -> str: ...
 
 class FirewallBackend(ABC):
     def create_rule(self, rule: FirewallRule) -> FirewallResult: ...
@@ -159,6 +170,7 @@ sequenceDiagram
 | Telemetry source | `Collector` | the engine only sees `Event` |
 | Detection | `DetectionRule`, or drop a Sigma YAML file | the engine iterates rules generically |
 | Security check | `PostureCheck` | the report scores any check result |
+| Hardening fix | `Fix` (or `RegistryFix` with a list of values) | the engine applies every safeguard |
 | Firewall platform | `FirewallBackend` | the factory picks the backend per OS |
 | Storage | `EventStore` | callers use the interface |
 
@@ -170,6 +182,7 @@ aegis/
 ├── collectors/  OBSERVE   network · processes · file integrity
 ├── detection/   DECIDE    rules · sigma · ml_assist · trust · guidance
 ├── posture/     AUDIT     security check and score
+├── hardening/   FIX       confirmed, verified, reversible fixes
 ├── intel/       threat-intel blocklists
 ├── response/    ACT       netsh · nftables · pf backends
 ├── storage/     RECORD    SQLite store and audit trail
@@ -198,7 +211,7 @@ tests/       unit, contract, injection and architecture tests
 
 ## 10. Scope
 
-**In scope:** security audit, hardening guidance, monitoring, local detection,
+**In scope:** security audit, safe hardening with undo, monitoring, local detection,
 responses on this computer, and a local dashboard of this computer.
 
 **Out of scope:** central log management, multi-host correlation, incident
