@@ -34,6 +34,8 @@ TECHNIQUE_NAMES: dict[str, str] = {
     "T1059.001": "PowerShell",
     "T1059.004": "Unix Shell",
     "T1071": "Application Layer Protocol",
+    "T1071.004": "DNS",
+    "T1568.002": "Domain Generation Algorithms",
     "T1098": "Account Manipulation",
     "T1105": "Ingress Tool Transfer",
     "T1110": "Brute Force",

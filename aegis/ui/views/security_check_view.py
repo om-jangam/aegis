@@ -283,11 +283,13 @@ class SecurityCheckView(BaseView):
     def _show_intel(self) -> None:
         intel = get_intel()
         if len(intel):
-            self.intel_count.value = f"{len(intel):,} known-malicious addresses loaded"
+            self.intel_count.value = (f"{len(intel):,} known-malicious addresses "
+                                      f"and domains loaded")
             detail = ", ".join(f"{name} ({count:,})" for name, count in sorted(intel.sources.items()))
         else:
             self.intel_count.value = "No blocklists loaded"
-            detail = "Download free public lists to catch connections to known attacker servers."
+            detail = ("Download free public lists to catch connections to, and lookups "
+                      "of, known attacker servers.")
         if not settings.threat_intel_enabled:
             detail += "  (matching is turned off in Settings)"
         self.intel_sources.value = detail

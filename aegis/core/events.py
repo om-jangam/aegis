@@ -33,6 +33,7 @@ class EventType(StrEnum):
     FILE_CREATED = "file_created"
     FILE_MODIFIED = "file_modified"
     FILE_DELETED = "file_deleted"
+    DNS_QUERY = "dns_query"                  # a name this computer looked up
     AUTH_FAILURE = "auth_failure"            # a sign-in was refused
     AUTH_SUCCESS = "auth_success"            # a sign-in was accepted
     ACCOUNT_CREATED = "account_created"      # a new user account
@@ -48,6 +49,7 @@ class EventSource(StrEnum):
     ETW = "etw"                # Event Tracing for Windows (kernel-grade)
     FIREWALL = "firewall"      # Windows Firewall / netsh
     FILESYSTEM = "filesystem"  # file integrity baseline comparison
+    DNS_CACHE = "dns_cache"    # the resolver cache of names looked up recently
     AUTH_LOG = "auth_log"      # the OS sign-in record (Security log, auth.log, journal)
     SYSTEM = "system"          # Aegis itself
 
@@ -130,6 +132,44 @@ class ProcessEvent(Event):
         if self.parent_name:
             return f"{name} (pid {self.pid}), started by {self.parent_name} (pid {self.ppid})"
         return f"{name} (pid {self.pid}, parent pid {self.ppid})"
+
+
+@dataclass(frozen=True)
+class DnsEvent(Event):
+    """A name this computer looked up, and what it resolved to.
+
+    Read from the resolver cache, which records the name and the answer but not
+    which program asked, so ``process_name`` stays empty unless a richer source
+    fills it in later.
+    """
+
+    domain: str = ""
+    record_type: str = ""        # "A", "AAAA", "CNAME", "TXT"...
+    answers: tuple[str, ...] = ()
+    process_name: str = ""
+
+    @property
+    def labels(self) -> list[str]:
+        return [part for part in self.domain.split(".") if part]
+
+    @property
+    def parent_domain(self) -> str:
+        """The registrable-looking part, e.g. ``files.evil.co.uk`` -> ``evil.co.uk``.
+
+        A real public-suffix list is overkill here: rules only use this to group
+        lookups of one site together, and two-label suffixes cover the common
+        cases that would otherwise group everything under ``co.uk``.
+        """
+        labels = self.labels
+        if len(labels) < 3:
+            return ".".join(labels)
+        if len(labels[-1]) == 2 and len(labels[-2]) <= 3:      # .co.uk, .com.au
+            return ".".join(labels[-3:])
+        return ".".join(labels[-2:])
+
+    def summary(self) -> str:
+        answers = ", ".join(self.answers[:3]) if self.answers else "no answer"
+        return f"{self.domain} ({self.record_type or 'lookup'}) -> {answers}"
 
 
 @dataclass(frozen=True)

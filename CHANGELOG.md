@@ -15,6 +15,16 @@ All notable changes to Aegis are documented here. The format is based on
 - DNS telemetry, so threat intel can match malicious domains as well as IPs.
 
 ### Added
+- **DNS monitoring**: a collector reads the resolver cache (`Get-DnsClientCache`
+  on Windows, `resolvectl show-cache` on Linux; macOS unsupported and says so)
+  and reports each name once. Four rules cover a known-malicious domain
+  (T1071.004), a name resolving to a blocklisted address, a machine-generated
+  name (T1568.002, with CDN and cloud suffixes excluded and two independent
+  signals required), and data leaving through DNS (many subdomains of one site,
+  or a label long enough to be carrying data).
+- Threat-intel lists now hold **domain names** as well as addresses, including
+  hosts-file lines, and a listed domain matches its subdomains. abuse.ch
+  URLhaus is available as a feed for `aegis intel update`.
 - **Four more security checks**, each with the same plain-language fix advice:
   password policy (length and lockout, on Windows and Linux), the Windows guest
   account, risky Windows services (cleartext ones fail; Remote Registry, ICS and

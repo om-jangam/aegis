@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from aegis.alerting.notifier import Notifier
 from aegis.collectors.auth import AuthCollector
 from aegis.collectors.base import Collector
+from aegis.collectors.dns import DnsCollector
 from aegis.collectors.filesystem import FileIntegrityCollector
 from aegis.collectors.network import NetworkCollector
 from aegis.collectors.processes import ProcessCollector
@@ -74,7 +75,7 @@ class SecurityService:
         # An explicit empty list means "no collectors" (events are fed in by hand).
         self.collectors: list[Collector] = collectors if collectors is not None else [
             NetworkCollector(), ProcessCollector(), FileIntegrityCollector(),
-            AuthCollector(state_path=DATA_DIR / "auth_state.json"),
+            AuthCollector(state_path=DATA_DIR / "auth_state.json"), DnsCollector(),
         ]
         self.auto_respond = auto_respond
 
@@ -193,6 +194,8 @@ class SecurityService:
     def _interval_for(self, collector: Collector) -> float:
         if collector.name == "processes":
             return max(1.0, settings.process_poll_interval)
+        if collector.name == "dns":
+            return max(10.0, settings.dns_poll_interval)
         if collector.name == "auth":
             # Reading the Security log shells out to PowerShell; polling it as
             # often as the socket table would cost more than it is worth.

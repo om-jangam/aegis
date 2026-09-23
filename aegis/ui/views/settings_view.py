@@ -19,6 +19,7 @@ class SettingsView(BaseView):
         self.threat_intel = ft.Switch(value=settings.threat_intel_enabled, active_color=theme.PRIMARY)
         self.anomaly = ft.Switch(value=settings.anomaly_detection_enabled, active_color=theme.PRIMARY)
         self.auth = ft.Switch(value=settings.auth_monitoring_enabled, active_color=theme.PRIMARY)
+        self.dns = ft.Switch(value=settings.dns_monitoring_enabled, active_color=theme.PRIMARY)
         self.notifications = ft.Switch(value=settings.desktop_notifications, active_color=theme.PRIMARY)
         self.auto_respond = ft.Switch(value=self.service.auto_respond, active_color=theme.DANGER)
         self.space = ft.Switch(value=settings.space_background, active_color=theme.PRIMARY)
@@ -54,6 +55,9 @@ class SettingsView(BaseView):
                 row("Smart unusual-activity detection",
                     "Learn what is normal for this computer and flag connections that stand out",
                     self.anomaly),
+                row("Watch name lookups (DNS)",
+                    "Alert when this computer looks up a known-malicious website, a "
+                    "machine-generated name, or smuggles data out through DNS.", self.dns),
                 row("Watch sign-ins",
                     "Alert on repeated wrong passwords, new accounts and accounts given "
                     "administrator rights. Needs administrator rights on Windows.", self.auth),
@@ -139,6 +143,7 @@ class SettingsView(BaseView):
         settings.threat_intel_enabled = self.threat_intel.value
         settings.anomaly_detection_enabled = self.anomaly.value
         settings.auth_monitoring_enabled = self.auth.value
+        settings.dns_monitoring_enabled = self.dns.value
         settings.desktop_notifications = self.notifications.value
         settings.threat_score_alert_threshold = int(self.threshold.value or 70)
         settings.network_poll_interval = interval

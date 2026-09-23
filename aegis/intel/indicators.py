@@ -4,9 +4,10 @@ Rules recognise *behaviour*; indicators recognise *infrastructure*. A connection
 to a botnet controller on port 443 looks normal to every behavioural rule; only
 knowing that the address is bad catches it.
 
-Indicator files are plain text, one IP address or CIDR range per line, with
-``#`` or ``;`` comments. That is the format of abuse.ch, Spamhaus DROP and most
-public blocklists, so a list can be dropped in unchanged.
+Indicator files are plain text, one IP address, CIDR range or domain name per
+line, with ``#`` or ``;`` comments. Hosts-file lines (``0.0.0.0 evil.example``)
+are understood too, so abuse.ch, Spamhaus DROP, URLhaus and most public
+blocklists can be dropped in unchanged.
 
 Entries covering private, loopback or reserved space, or networks broader than
 /8 (IPv4) or /32 (IPv6), are rejected: one careless ``0.0.0.0/0`` line in a
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +25,11 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 _MIN_PREFIX = {4: 8, 6: 32}
+#: A domain indicator: at least two labels, letters/digits/hyphens only.
+_DOMAIN_RE = re.compile(r"^(?=.{4,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)"
+                        r"(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$")
+#: Addresses a hosts file uses to mean "send this nowhere".
+_BLACKHOLE = ("0.0.0.0", "127.0.0.1", "::", "::1")
 INDICATOR_SUFFIXES = frozenset({".txt", ".list", ".netset", ".ipset"})
 
 IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
@@ -53,6 +60,27 @@ def parse_indicator(token: str) -> IPNetwork | None:
     return net
 
 
+def parse_domain(token: str) -> str | None:
+    """Parse one domain indicator, or return None if it is unusable.
+
+    A bare suffix such as ``com`` is rejected: blocking a whole top-level
+    domain from one careless feed line would flag half the internet.
+    """
+    domain = token.strip().rstrip(".").lower()
+    if domain.startswith("*."):
+        domain = domain[2:]
+    if not _DOMAIN_RE.match(domain):
+        return None
+    # The last label must be a real suffix, which also keeps an address that
+    # was rejected as an indicator (a private range, say) from sneaking back
+    # in as a "domain": 10.0.0.1 matches the shape of a name, but .1 is not a
+    # top-level domain.
+    suffix = domain.rsplit(".", 1)[1]
+    if not suffix.isalpha() and not suffix.startswith("xn--"):
+        return None
+    return domain
+
+
 def _normalise(ip: str) -> IPAddress | None:
     try:
         addr = ipaddress.ip_address(ip.split("%", 1)[0])
@@ -69,6 +97,7 @@ class ThreatIntel:
     def __init__(self) -> None:
         self._hosts: dict[IPAddress, str] = {}
         self._networks: list[tuple[IPNetwork, str]] = []
+        self._domains: dict[str, str] = {}
         #: Accepted indicator count per source list.
         self.sources: dict[str, int] = {}
         #: Lines that were not a usable indicator (headers, private ranges...).
@@ -77,7 +106,12 @@ class ThreatIntel:
     def add(self, token: str, source: str) -> bool:
         net = parse_indicator(token)
         if net is None:
-            return False
+            domain = parse_domain(token)
+            if domain is None:
+                return False
+            self._domains.setdefault(domain, source)
+            self.sources[source] = self.sources.get(source, 0) + 1
+            return True
         if net.num_addresses == 1:
             self._hosts.setdefault(net.network_address, source)
         else:
@@ -91,7 +125,9 @@ class ThreatIntel:
             line = line.split("#", 1)[0].split(";", 1)[0].strip()
             if not line:
                 continue
-            token = line.replace(",", " ").split()[0]
+            fields = line.replace(",", " ").split()
+            # A hosts-file line points a bad domain at nowhere: take the domain.
+            token = fields[1] if len(fields) > 1 and fields[0] in _BLACKHOLE else fields[0]
             if self.add(token, source):
                 added += 1
             else:
@@ -123,9 +159,22 @@ class ThreatIntel:
                 return IntelMatch(str(net), src)
         return None
 
+    def match_domain(self, domain: str) -> IntelMatch | None:
+        """Match a name, or any parent of it: a listed ``evil.example`` catches
+        ``cdn.evil.example`` too, which is how attackers use subdomains."""
+        name = (domain or "").strip().rstrip(".").lower()
+        labels = [label for label in name.split(".") if label]
+        for start in range(len(labels) - 1):
+            candidate = ".".join(labels[start:])
+            source = self._domains.get(candidate)
+            if source is not None:
+                return IntelMatch(candidate, source)
+        return None
+
     def indicators(self) -> Iterator[str]:
         yield from (str(addr) for addr in self._hosts)
         yield from (str(net) for net, _ in self._networks)
+        yield from self._domains
 
     def __len__(self) -> int:
-        return len(self._hosts) + len(self._networks)
+        return len(self._hosts) + len(self._networks) + len(self._domains)

@@ -35,6 +35,12 @@ _GUIDANCE: dict[str, str] = {
               "Disconnect from the network now and shut the machine down to limit damage."),
     "T1543": ("A service or startup item was added or changed, a way malware survives "
               "reboots. Confirm you installed something recently; otherwise remove it."),
+    "T1071.004": ("Something looked up a name linked to attackers, or is using DNS to carry "
+                  "data in and out. Find the program that asked (Running Programs), block "
+                  "the address it resolves to, and scan the computer."),
+    "T1568.002": ("A program looked up a name that looks machine-generated, which is how "
+                  "malware finds a controller. On its own this can be a false alarm; "
+                  "together with another alert about the same program, treat it seriously."),
     "T1562": ("A protection on this computer was turned off or weakened. Turn it back on "
               "(the Security Check page can fix most of these for you) and, if you did not "
               "change it yourself, scan the machine: malware disables defences first."),

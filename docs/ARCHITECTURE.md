@@ -77,7 +77,7 @@ to SENTINEL-X when the user enables it.
 | `core/events.py` | Normalized, immutable telemetry: `NetworkEvent`, `ProcessEvent`, `FileEvent`. |
 | `core/models.py` | Domain models: `Severity`, `Finding`, `Alert`, `AuditEvent`, `FirewallRule`. |
 | `core/validators.py` | Input validation for rule fields; the front line against command injection. |
-| `collectors/` | psutil network and process collectors, file integrity monitoring (baseline + digest comparison), and sign-in monitoring reading the OS security log. |
+| `collectors/` | psutil network and process collectors, file integrity monitoring (baseline + digest comparison), sign-in monitoring reading the OS security log, and DNS monitoring reading the resolver cache. |
 | `detection/engine.py`, `base.py` | Offers each event to the rules that want it; shared rolling `DetectionContext`. |
 | `detection/rules/` | Hand-written, stateful, ATT&CK-mapped rules (network, process, file, threat intel). |
 | `detection/sigma/` | Loader, condition parser and field mapping for Sigma rules; bundled rules in `sigma/rules/`. |
@@ -87,7 +87,7 @@ to SENTINEL-X when the user enables it.
 | `posture/watch.py` | Compares one security check with the previous one, so a protection that is switched off raises an alert (T1562.001) instead of only lowering the score. |
 | `posture/` | The security check: firewall, exposed services, updates, startup programs, Defender, UAC, RDP, SMBv1, auto-logon, disk encryption, SSH, sensitive file permissions, password policy, guest account, risky services, screen lock. Produces a scored `PostureReport`. |
 | `hardening/` | Safe fixes for weaknesses the check finds. `HardeningEngine` enforces confirm → admin check → backup → apply (rollback on failure) → verify → record for every `Fix`; history lives in the `remediations` table with undo. |
-| `intel/` | Local threat-intel blocklists (IPs and CIDR ranges) and the feed downloader. |
+| `intel/` | Local threat-intel blocklists (IP addresses, CIDR ranges and domain names, including hosts-file format) and the feed downloader. |
 | `response/actions.py` | Containment on this computer: stop a program (refusing system processes and Aegis itself) and quarantine a file (move, never delete, always restorable). Both require explicit confirmation and are audited. |
 | `response/` | `FirewallBackend` contract with Windows (`netsh`), Linux (`nftables`) and macOS (`pf` anchor) engines; argument-list execution, never a shell. `NullFirewall` when no backend is usable. |
 | `storage/` | `EventStore` contract and its SQLite (WAL) implementation for events, findings, alerts, audit and fix history. |

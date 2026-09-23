@@ -60,6 +60,10 @@ class Settings:
     process_poll_interval: float = 3.0      # seconds between process scans
     monitoring_enabled: bool = True
 
+    # DNS monitoring (which names this computer looked up)
+    dns_monitoring_enabled: bool = True
+    dns_poll_interval: float = 30.0
+
     # Sign-in monitoring (the OS security log: failed logins, new accounts)
     auth_monitoring_enabled: bool = True
     auth_poll_interval: float = 30.0
