@@ -96,3 +96,33 @@ def test_live_training_is_not_overwritten_by_a_stale_saved_model(tmp_path):
     ml._model, ml._trained = fresh, True
     ml._load()                                  # a late background load landing
     assert ml._model is fresh
+
+
+def test_a_model_from_another_scikit_learn_version_is_discarded(tmp_path, monkeypatch, caplog):
+    """Scoring with a model pickled by a different version would be guesswork."""
+    import warnings
+
+    import joblib
+    from sklearn.exceptions import InconsistentVersionWarning
+
+    path = tmp_path / "m.joblib"
+    seed = MLAssist(model_path=path)
+    for i in range(120):
+        seed.observe(_net(f"10.0.0.{i % 40}", 443))
+    seed.train()
+    seed.save()
+    assert path.exists()
+
+    real_load = joblib.load
+
+    def load_with_version_warning(*args, **kwargs):
+        warnings.warn(InconsistentVersionWarning(estimator_name="IsolationForest",
+                                                 current_sklearn_version="9.9.9",
+                                                 original_sklearn_version="1.0.0"),
+                      stacklevel=1)
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(joblib, "load", load_with_version_warning)
+    reloaded = MLAssist(model_path=path, load_async=False)
+    assert reloaded.score(_net("10.0.0.1", 443)) is None      # nothing was loaded
+    assert not path.exists()                                   # and the stale file is gone

@@ -19,6 +19,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import threading
+import warnings
 from collections import deque
 
 from aegis.config import MODEL_PATH, settings
@@ -183,9 +184,21 @@ class MLAssist:
     def _load(self) -> None:
         try:
             import joblib
+            from sklearn.exceptions import InconsistentVersionWarning
+
             if not self._model_path.exists():
                 return
-            model = joblib.load(self._model_path)
+            # A model pickled by another scikit-learn version may behave subtly
+            # differently, and scoring connections with it would be guesswork.
+            # Better to drop it and learn this computer again from scratch.
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", InconsistentVersionWarning)
+                model = joblib.load(self._model_path)
+            if any(issubclass(w.category, InconsistentVersionWarning) for w in caught):
+                log.info("The saved anomaly model was built by a different scikit-learn "
+                         "version; learning this computer again instead.")
+                self._model_path.unlink(missing_ok=True)
+                return
             with self._lock:
                 # Training can finish first on a busy host; a stale model from
                 # disk must not overwrite one just fitted to live traffic.
