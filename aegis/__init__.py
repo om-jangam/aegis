@@ -5,7 +5,7 @@ management with live network/process monitoring, anomaly-based intrusion
 detection, audit logging and real-time alerting.
 """
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"
 __app_name__ = "Aegis"
 __description__ = "Host Firewall & Intrusion Detection System"
 

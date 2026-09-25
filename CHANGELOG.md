@@ -13,6 +13,24 @@ All notable changes to Aegis are documented here. The format is based on
   residual risk.
 - Locale-independent firewall management via the Windows COM API (`INetFwPolicy2`).
 
+## [2.0.0] - 2026-09-25
+
+Aegis grew from "tells you what is wrong" into "fixes it, watches the ways in,
+and can contain what it finds", while staying a tool for one computer.
+
+**Highlights**
+- **Hardening**: the security check now leads to a fix. Every fix explains the
+  risk, shows the exact change, asks first, backs up, applies, verifies and can
+  be undone.
+- **New eyes**: sign-in monitoring (password guessing, new accounts, granted
+  admin rights), DNS monitoring (malicious, machine-generated and tunnelling
+  domains), and an alert when a security setting is switched off again.
+- **Containment on this computer**: stop a suspicious program, or quarantine a
+  file without ever deleting it.
+- **Four more security checks** (16 in total), and an optional export to the
+  separate SENTINEL-X project, off by default.
+- **Quality**: 757 tests, clean lint and type checking on every push.
+
 ### Added
 - **DNS monitoring**: a collector reads the resolver cache (`Get-DnsClientCache`
   on Windows, `resolvectl show-cache` on Linux; macOS unsupported and says so)
