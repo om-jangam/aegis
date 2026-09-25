@@ -12,7 +12,6 @@ All notable changes to Aegis are documented here. The format is based on
 - Signed / integrity-checked ML model format to remove the `joblib` pickle
   residual risk.
 - Locale-independent firewall management via the Windows COM API (`INetFwPolicy2`).
-- DNS telemetry, so threat intel can match malicious domains as well as IPs.
 
 ### Added
 - **DNS monitoring**: a collector reads the resolver cache (`Get-DnsClientCache`

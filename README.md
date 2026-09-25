@@ -387,7 +387,6 @@ pyinstaller --noconfirm --windowed --name Aegis ^
 ## Roadmap
 
 - **Sysmon / ETW collectors** for kernel-grade telemetry.
-- **DNS telemetry** so threat intel can match malicious domains.
 - **Locale-independent firewall** via the Windows COM API (`INetFwPolicy2`).
 
 ## Disclaimer
