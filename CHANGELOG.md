@@ -6,6 +6,17 @@ All notable changes to Aegis are documented here. The format is based on
 
 ## [Unreleased]
 
+### Planned
+- Sysmon / ETW collectors for kernel-grade telemetry (short-lived connections,
+  in-memory techniques).
+- Signed / integrity-checked ML model format to remove the `joblib` pickle
+  residual risk.
+- Locale-independent firewall management via the Windows COM API (`INetFwPolicy2`).
+
+## [2.1.0] - 2026-09-27
+
+Aegis now protects the computer when nobody is looking at it.
+
 ### Added
 - **Keeps watching after the window closes**: `aegis autostart enable`, or the
   switch in Settings, registers monitoring to start at sign-in through each
@@ -19,13 +30,6 @@ All notable changes to Aegis are documented here. The format is based on
   status` now shows who is watching and whether Aegis starts with the computer.
 - The packaged `Aegis.exe` accepts the same subcommands as `aegis`, so an
   installed copy can register `Aegis.exe monitor` to run at sign-in.
-
-### Planned
-- Sysmon / ETW collectors for kernel-grade telemetry (short-lived connections,
-  in-memory techniques).
-- Signed / integrity-checked ML model format to remove the `joblib` pickle
-  residual risk.
-- Locale-independent firewall management via the Windows COM API (`INetFwPolicy2`).
 
 ## [2.0.0] - 2026-09-25
 
