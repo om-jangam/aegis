@@ -49,21 +49,26 @@ class ProcessesView(BaseView):
         self.safe_update()
 
     def _confirm_stop(self, proc) -> None:
-        """Ask before stopping a program, and say what stopping it means."""
+        """Ask before stopping a program, and stop every process it runs as."""
+        copies = len(self.service.stopper.running(proc.name))
+
         def stop(e):
             self.page.pop_dialog()
-            result = self.service.stop_process(proc.pid, proc.name, confirmed=True,
+            result = self.service.stop_program(proc.name, confirmed=True,
                                                reason="stopped from Running Programs")
             self.app.toast(result.message, ok=result.ok)
             self.refresh()
 
+        spread = ("" if copies <= 1 else
+                  f"\n\n{proc.name} is running as {copies} processes. Apps like browsers "
+                  f"and music players split themselves up, so all {copies} will be stopped "
+                  f"together; stopping only one would change nothing.")
         self.page.show_dialog(ft.AlertDialog(
             modal=True, title=ft.Text(f"Stop {proc.name}?"),
             content=ft.Text(
-                f"{proc.name} (process {proc.pid}) will be asked to close, and closed "
-                f"firmly if it refuses. Anything it has not saved is lost, and a program "
-                f"the computer needs may start again by itself.\n\n"
-                f"{proc.exe or 'Location not available'}", width=460),
+                f"{proc.name} will be asked to close, and closed firmly if it refuses. "
+                f"Anything it has not saved is lost, and some programs start themselves "
+                f"again.{spread}\n\n{proc.exe or 'Location not available'}", width=460),
             actions=[ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog()),
                      ft.FilledButton("Stop program", icon=ft.Icons.STOP_CIRCLE_OUTLINED,
                                      on_click=stop)]))

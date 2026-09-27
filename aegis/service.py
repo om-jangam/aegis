@@ -393,6 +393,14 @@ class SecurityService:
                    f"Stop {name or 'process'} (pid {pid})", result.message)
         return result
 
+    def stop_program(self, name: str, *, confirmed: bool = False, reason: str = "manual"):
+        """Stop every process a program runs as (after confirmation), and record it."""
+        result = self.stopper.stop_program(name, confirmed=confirmed, reason=reason)
+        self.audit("RESPONSE", "program_stopped" if result.ok else "program_stop_failed",
+                   Severity.MEDIUM if result.ok else Severity.INFO,
+                   f"Stop {name}", result.message)
+        return result
+
     def quarantine_file(self, path, *, confirmed: bool = False, reason: str = "manual"):
         """Move a file out of reach (after confirmation), keeping it restorable."""
         result = self.quarantine.add(path, confirmed=confirmed, reason=reason)

@@ -280,3 +280,88 @@ def test_service_records_a_refused_process_stop(service):
     audit = service.store.recent_audit(category="RESPONSE")
     assert audit[0].action == "process_stop_refused"
     assert "confirmation" in audit[0].detail
+
+
+# --------------------------------------------------------------------------- #
+# Stopping a program that runs as several processes
+# --------------------------------------------------------------------------- #
+class ManyProcesses:
+    """A program running as several processes, the way browsers and players do."""
+
+    def __init__(self, name="spotify.exe", pids=(10, 11, 12), survivors=()):
+        self.name = name
+        self.alive = {pid: FakeProcess(pid, name) for pid in pids}
+        self.survivors = set(survivors)
+        self.stopped: list[int] = []
+
+    def running(self, _name):
+        return [pid for pid in sorted(self.alive, reverse=True)
+                if pid in self.alive]
+
+    def get(self, pid):
+        if pid not in self.alive:
+            raise psutil.NoSuchProcess(pid)
+        return self.alive[pid]
+
+    def stopper(self, monkeypatch):
+        def wait_procs(procs, timeout=None):
+            for proc in procs:
+                if proc.pid not in self.survivors:
+                    proc.alive = False
+                    self.alive.pop(proc.pid, None)
+                    self.stopped.append(proc.pid)
+            alive = [p for p in procs if p.alive]
+            return [p for p in procs if not p.alive], alive
+
+        monkeypatch.setattr(psutil, "wait_procs", wait_procs)
+        stopper = ProcessStopper(process_source=self.get, own_pid=999)
+        monkeypatch.setattr(stopper, "running", self.running)
+        return stopper
+
+
+def test_stopping_a_program_stops_every_process_it_runs_as(monkeypatch):
+    app = ManyProcesses(pids=(10, 11, 12))
+    result = app.stopper(monkeypatch).stop_program("spotify.exe", confirmed=True)
+    assert result.ok and "3 copies" in result.message
+    assert sorted(app.stopped) == [10, 11, 12]
+
+
+def test_helpers_are_stopped_before_the_process_that_started_them(monkeypatch):
+    app = ManyProcesses(pids=(10, 11, 12))
+    app.stopper(monkeypatch).stop_program("spotify.exe", confirmed=True)
+    assert app.stopped == [12, 11, 10]      # newest first
+
+
+def test_stopping_a_program_needs_confirmation(monkeypatch):
+    app = ManyProcesses()
+    result = app.stopper(monkeypatch).stop_program("spotify.exe")
+    assert not result.ok and "confirmation" in result.message
+    assert app.stopped == []
+
+
+def test_a_program_that_restarts_itself_is_reported_honestly(monkeypatch):
+    app = ManyProcesses(pids=(10, 11), survivors=(11,))
+    result = app.stopper(monkeypatch).stop_program("spotify.exe", confirmed=True)
+    assert not result.ok
+    assert "started again or could not be stopped" in result.message
+
+
+def test_a_program_that_is_not_running_says_so(monkeypatch):
+    app = ManyProcesses(pids=())
+    result = app.stopper(monkeypatch).stop_program("spotify.exe", confirmed=True)
+    assert not result.ok and "not running any more" in result.message
+
+
+def test_a_system_program_is_refused_as_a_whole(monkeypatch):
+    app = ManyProcesses(name="lsass.exe", pids=(10,))
+    result = app.stopper(monkeypatch).stop_program("lsass.exe", confirmed=True)
+    assert not result.ok and "operating system" in result.message
+    assert app.stopped == []
+
+
+def test_service_records_stopping_a_whole_program(service, monkeypatch):
+    monkeypatch.setattr(service.stopper, "running", lambda name: [])
+    result = service.stop_program("spotify.exe", confirmed=True)
+    assert not result.ok
+    audit = service.store.recent_audit(category="RESPONSE")
+    assert audit[0].action == "program_stop_failed"

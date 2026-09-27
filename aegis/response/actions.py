@@ -72,7 +72,7 @@ def is_protected_path(path: str | os.PathLike[str]) -> bool:
 # Stopping a program
 # --------------------------------------------------------------------------- #
 class ProcessStopper:
-    """Stops a running program, politely first, then firmly."""
+    """Stops a running program: one process, or every process it runs as."""
 
     #: How long the program is given to close itself before it is killed.
     GRACE_SECONDS = 5
@@ -131,6 +131,67 @@ class ProcessStopper:
         note = f" ({reason})" if reason else ""
         return ResponseResult(True, "stop_process", f"Stopped {name} (process {pid}){note}.")
 
+
+    def running(self, name: str) -> list[int]:
+        """Every process id this program is running as, newest first.
+
+        Modern apps are not one process: a browser, Spotify or Teams runs a
+        parent and a handful of helpers. Stopping one of them changes nothing a
+        person can see, which is why stopping a *program* means all of them.
+        """
+        found = []
+        wanted = (name or "").lower()
+        try:
+            import psutil
+
+            for process in psutil.process_iter(["pid", "name", "create_time"]):
+                info = process.info
+                if (info.get("name") or "").lower() == wanted:
+                    found.append((info.get("create_time") or 0, info["pid"]))
+        except Exception:  # noqa: BLE001 - a process table we cannot read is not fatal
+            log.exception("Could not list the processes of %s", name)
+        # Newest first: helpers start after the parent, and stopping them first
+        # keeps the parent from simply starting new ones.
+        return [pid for _, pid in sorted(found, reverse=True)]
+
+    def stop_program(self, name: str, *, confirmed: bool = False,
+                     reason: str = "") -> ResponseResult:
+        """Stop every process this program is running as."""
+        if not confirmed:
+            return ResponseResult(False, "stop_program",
+                                  "Stopping a program needs confirmation.")
+        if is_protected_process(name):
+            return ResponseResult(
+                False, "stop_program",
+                f"{name} is part of the operating system; stopping it would break this "
+                f"computer. Investigate it instead.")
+        pids = self.running(name)
+        if not pids:
+            return ResponseResult(False, "stop_program", f"{name} is not running any more.")
+
+        stopped, failures = 0, []
+        for pid in pids:
+            result = self.stop(pid, name, confirmed=True, reason=reason)
+            if result.ok:
+                stopped += 1
+            elif "any more" not in result.message:      # it exited by itself: fine
+                failures.append(result)
+
+        left = len(self.running(name))
+        if left and stopped:
+            return ResponseResult(
+                False, "stop_program",
+                f"Stopped {stopped} of {name}, but {left} started again or could not be "
+                f"stopped. Some programs restart themselves.",
+                needs_admin=any(f.needs_admin for f in failures))
+        if not stopped:
+            first = failures[0] if failures else None
+            return ResponseResult(False, "stop_program",
+                                  first.message if first else f"Could not stop {name}.",
+                                  needs_admin=bool(first and first.needs_admin))
+        copies = "copy" if stopped == 1 else "copies"
+        return ResponseResult(True, "stop_program",
+                              f"Stopped {name} ({stopped} {copies}).")
 
 # --------------------------------------------------------------------------- #
 # Quarantine

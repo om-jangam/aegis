@@ -108,22 +108,16 @@ class DetectionsView(BaseView):
 
     def _confirm_stop(self, name: str) -> None:
         """Stop every copy of the program this alert is about, after confirmation."""
-        from aegis.collectors.processes import snapshot
-
-        running = [p for p in snapshot() if p.name.lower() == name.lower()]
+        running = self.service.stopper.running(name)
         if not running:
             self.app.toast(f"{name} is not running any more.", ok=True)
             return
 
         def stop(e):
             self.page.pop_dialog()
-            results = [self.service.stop_process(p.pid, p.name, confirmed=True,
-                                                 reason="stopped from an alert")
-                       for p in running]
-            stopped = sum(1 for r in results if r.ok)
-            message = (f"Stopped {plural(stopped, 'copy', 'copies')} of {name}."
-                       if stopped else results[0].message)
-            self.app.toast(message, ok=bool(stopped))
+            result = self.service.stop_program(name, confirmed=True,
+                                               reason="stopped from an alert")
+            self.app.toast(result.message, ok=result.ok)
             self.refresh()
 
         self.page.show_dialog(ft.AlertDialog(
