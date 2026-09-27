@@ -132,31 +132,44 @@ class ProcessStopper:
         return ResponseResult(True, "stop_process", f"Stopped {name} (process {pid}){note}.")
 
 
-    def running(self, name: str) -> list[int]:
+    def running(self, name: str, exe: str = "") -> list[int]:
         """Every process id this program is running as, newest first.
 
         Modern apps are not one process: a browser, Spotify or Teams runs a
         parent and a handful of helpers. Stopping one of them changes nothing a
         person can see, which is why stopping a *program* means all of them.
+
+        When ``exe`` is given, only processes running that exact file count.
+        Names are not unique: two unrelated programs can each ship an
+        ``updater.exe``, and stopping one must not close the other.
         """
         found = []
         wanted = (name or "").lower()
+        target = _normalise(exe) if exe else ""
         try:
             import psutil
 
-            for process in psutil.process_iter(["pid", "name", "create_time"]):
+            for process in psutil.process_iter(["pid", "name", "exe", "create_time"]):
                 info = process.info
-                if (info.get("name") or "").lower() == wanted:
-                    found.append((info.get("create_time") or 0, info["pid"]))
+                if (info.get("name") or "").lower() != wanted:
+                    continue
+                if target:
+                    location = _normalise(info.get("exe") or "")
+                    # A process whose location cannot be read (a permission
+                    # Windows does not grant for every process) is still counted:
+                    # missing a helper would leave the program running.
+                    if location and location != target:
+                        continue
+                found.append((info.get("create_time") or 0, info["pid"]))
         except Exception:  # noqa: BLE001 - a process table we cannot read is not fatal
             log.exception("Could not list the processes of %s", name)
         # Newest first: helpers start after the parent, and stopping them first
         # keeps the parent from simply starting new ones.
         return [pid for _, pid in sorted(found, reverse=True)]
 
-    def stop_program(self, name: str, *, confirmed: bool = False,
+    def stop_program(self, name: str, *, exe: str = "", confirmed: bool = False,
                      reason: str = "") -> ResponseResult:
-        """Stop every process this program is running as."""
+        """Stop every process this program runs as, from ``exe`` when it is known."""
         if not confirmed:
             return ResponseResult(False, "stop_program",
                                   "Stopping a program needs confirmation.")
@@ -165,7 +178,7 @@ class ProcessStopper:
                 False, "stop_program",
                 f"{name} is part of the operating system; stopping it would break this "
                 f"computer. Investigate it instead.")
-        pids = self.running(name)
+        pids = self.running(name, exe)
         if not pids:
             return ResponseResult(False, "stop_program", f"{name} is not running any more.")
 
@@ -177,7 +190,7 @@ class ProcessStopper:
             elif "any more" not in result.message:      # it exited by itself: fine
                 failures.append(result)
 
-        left = len(self.running(name))
+        left = len(self.running(name, exe))
         if left and stopped:
             return ResponseResult(
                 False, "stop_program",
@@ -192,6 +205,7 @@ class ProcessStopper:
         copies = "copy" if stopped == 1 else "copies"
         return ResponseResult(True, "stop_program",
                               f"Stopped {name} ({stopped} {copies}).")
+
 
 # --------------------------------------------------------------------------- #
 # Quarantine

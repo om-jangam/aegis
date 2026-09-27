@@ -294,7 +294,7 @@ class ManyProcesses:
         self.survivors = set(survivors)
         self.stopped: list[int] = []
 
-    def running(self, _name):
+    def running(self, _name, _exe=""):
         return [pid for pid in sorted(self.alive, reverse=True)
                 if pid in self.alive]
 
@@ -360,8 +360,50 @@ def test_a_system_program_is_refused_as_a_whole(monkeypatch):
 
 
 def test_service_records_stopping_a_whole_program(service, monkeypatch):
-    monkeypatch.setattr(service.stopper, "running", lambda name: [])
+    monkeypatch.setattr(service.stopper, "running", lambda name, exe="": [])
     result = service.stop_program("spotify.exe", confirmed=True)
     assert not result.ok
     audit = service.store.recent_audit(category="RESPONSE")
     assert audit[0].action == "program_stop_failed"
+
+
+class FakeListing:
+    """A process table for ProcessStopper.running()."""
+
+    def __init__(self, rows):
+        self.rows = rows      # (pid, name, exe, created)
+
+    def __call__(self, attrs=None):
+        for pid, name, exe, created in self.rows:
+            yield type("P", (), {"info": {"pid": pid, "name": name, "exe": exe,
+                                          "create_time": created}})()
+
+
+def test_only_the_program_at_that_location_is_stopped(monkeypatch):
+    """Two unrelated programs can ship an updater.exe; one must not close the other."""
+    monkeypatch.setattr(psutil, "process_iter", FakeListing([
+        (10, "updater.exe", r"C:\Users\me\AppData\Spotify\updater.exe", 1),
+        (11, "updater.exe", r"C:\Program Files\HP\updater.exe", 2),
+    ]))
+    stopper = ProcessStopper(own_pid=999)
+    assert stopper.running("updater.exe", r"C:\Users\me\AppData\Spotify\updater.exe") == [10]
+    assert stopper.running("updater.exe", r"C:\Program Files\HP\updater.exe") == [11]
+    assert stopper.running("updater.exe") == [11, 10]        # no location given: both
+
+
+def test_the_location_check_ignores_case_and_slashes(monkeypatch):
+    monkeypatch.setattr(psutil, "process_iter", FakeListing([
+        (10, "spotify.exe", r"C:\Apps\Spotify\Spotify.exe", 1),
+    ]))
+    stopper = ProcessStopper(own_pid=999)
+    assert stopper.running("spotify.exe", "c:/apps/spotify/spotify.exe") == [10]
+
+
+def test_a_process_whose_location_is_hidden_is_still_stopped(monkeypatch):
+    """Windows does not reveal every process's path; missing a helper is worse."""
+    monkeypatch.setattr(psutil, "process_iter", FakeListing([
+        (10, "spotify.exe", r"C:\Apps\Spotify\Spotify.exe", 1),
+        (11, "spotify.exe", "", 2),          # path not readable
+    ]))
+    stopper = ProcessStopper(own_pid=999)
+    assert stopper.running("spotify.exe", r"C:\Apps\Spotify\Spotify.exe") == [11, 10]

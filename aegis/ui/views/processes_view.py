@@ -50,11 +50,11 @@ class ProcessesView(BaseView):
 
     def _confirm_stop(self, proc) -> None:
         """Ask before stopping a program, and stop every process it runs as."""
-        copies = len(self.service.stopper.running(proc.name))
+        copies = len(self.service.stopper.running(proc.name, proc.exe or ""))
 
         def stop(e):
             self.page.pop_dialog()
-            result = self.service.stop_program(proc.name, confirmed=True,
+            result = self.service.stop_program(proc.name, exe=proc.exe or "", confirmed=True,
                                                reason="stopped from Running Programs")
             self.app.toast(result.message, ok=result.ok)
             self.refresh()
