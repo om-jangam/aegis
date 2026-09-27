@@ -33,6 +33,7 @@ from aegis.posture.watch import TACTIC, TECHNIQUE, regressions
 from aegis.response.actions import ProcessStopper, Quarantine
 from aegis.response.factory import get_firewall
 from aegis.response.firewall import FirewallResponder
+from aegis.runlock import LOCK_FILE, MonitorLock
 from aegis.storage.database import SQLiteEventStore
 
 log = logging.getLogger(__name__)
@@ -62,7 +63,8 @@ def _default_forwarder():
 
 class SecurityService:
     def __init__(self, store=None, engine=None, notifier=None, firewall=None,
-                 collectors=None, ml="default", auto_respond=False, forwarder="default"):
+                 collectors=None, ml="default", auto_respond=False, forwarder="default",
+                 lock="default", kind="app"):
         self.store = store or SQLiteEventStore()
         self.engine = engine or DetectionEngine()
         self.notifier = notifier or Notifier()
@@ -79,6 +81,11 @@ class SecurityService:
         ]
         self.auto_respond = auto_respond
 
+        #: Only one Aegis watches a computer; a second one shows what the first
+        #: records. None disables the check (tests, and one-off commands).
+        self.lock = MonitorLock(DATA_DIR / LOCK_FILE, kind) if lock == "default" else lock
+        #: True when another Aegis is watching and this one only reads.
+        self.read_only = False
         self._threads: list[threading.Thread] = []
         self._stop = threading.Event()
         self._running = False
@@ -121,6 +128,14 @@ class SecurityService:
             return
         self._running = True
         self._stop.clear()
+        self.read_only = self.lock is not None and not self.lock.acquire()
+        if self.read_only:
+            holder = self.lock.holder()
+            watcher = holder.describe() if holder else "another Aegis"
+            log.info("Not watching: %s is already watching this computer.", watcher)
+            self.audit("SYSTEM", "monitoring_deferred", Severity.INFO,
+                       f"Showing what {watcher} records; not watching twice.")
+            return
         # Enforce data retention on startup so the local store can't grow forever.
         try:
             removed = self.purge_old()
@@ -165,6 +180,8 @@ class SecurityService:
     def stop(self) -> None:
         self._running = False
         self._stop.set()
+        if self.lock is not None:
+            self.lock.release()
         for col in self.collectors:
             col.stop()
         # Join collector threads so no poll is mid-flight when we persist the

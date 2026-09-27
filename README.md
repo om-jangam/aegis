@@ -83,6 +83,7 @@ Score 81/100 (grade B): 1 failed, 1 warnings, 6 passed, 0 skipped
 |------|--------------|
 | ✅ **Security posture audit** | `aegis check`: 16 read-only checks (firewall, exposed services, OS updates, suspicious startup programs, antivirus, UAC, RDP/NLA, SMBv1, auto-logon, disk encryption, SSH hardening, file permissions, password policy, guest account, risky services, screen lock), scored 0-100 with a fix for each failure |
 | 🛠️ **Safe hardening** | `aegis harden` and a **Fix** button on the Security Check page: explains the risk, shows exactly what will change, asks first, saves the old settings, applies, verifies and records the fix, with **Undo** |
+| 🔄 **Keeps watching** | `aegis autostart enable`, or one switch in Settings, starts monitoring whenever you sign in, with no window and no administrator rights. Only one Aegis ever watches: a second one shows what the first records |
 | 🌍 **DNS monitoring** | Sees which names this computer looks up: known-malicious domains, names that resolve to blocklisted addresses, machine-generated names, and data smuggled out through DNS |
 | 🔑 **Sign-in monitoring** | Reads the computer's own security log: password guessing and spraying, a success straight after failures, new accounts, accounts given administrator rights, lockouts |
 | 🔔 **Setting-change alerts** | Re-checks security settings on a timer and alerts when something that was safe (firewall, antivirus, UAC) is turned off again |
@@ -110,6 +111,7 @@ Score 81/100 (grade B): 1 failed, 1 warnings, 6 passed, 0 skipped
 | `aegis intel update` / `status` / `lookup <ip>` | Manage and query threat-intel blocklists |
 | `aegis block <ip> [--note ...]` | Contain a remote host (needs Administrator / root) |
 | `aegis stop <pid> [--yes]` | Stop a running program, after confirmation |
+| `aegis autostart status \| enable \| disable` | Watch automatically from sign-in, and stop doing so |
 | `aegis quarantine <file> \| --list \| --restore <id>` | Move a file out of reach, or put it back |
 | `aegis rules [--all]` | List firewall rules Aegis manages |
 | `aegis sigma [paths] [--list]` | Report how much of a Sigma rule set Aegis can evaluate |

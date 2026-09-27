@@ -16,6 +16,7 @@ Commands
 ``aegis block``     contain a remote host
 ``aegis stop``      stop a running program
 ``aegis quarantine`` move a file out of reach, or put it back
+``aegis autostart`` start watching automatically when you sign in
 ``aegis check``     audit this computer's security settings
 ``aegis harden``    safely fix what the check found, with undo
 ``aegis console``   launch the desktop UI (default)
@@ -135,11 +136,13 @@ def _start_background_security_check(service) -> None:
 def cmd_status(args) -> int:
     """Report what Aegis can see and do on this host."""
     from aegis.alerting.notifier import notification_backend
+    from aegis.autostart import Autostart
     from aegis.config import DATA_DIR, settings
     from aegis.detection.engine import DetectionEngine
     from aegis.forwarding import QUEUE_FILE, EventQueue
     from aegis.platforms import CURRENT_OS, is_elevated, privilege_hint
     from aegis.response.factory import get_firewall
+    from aegis.runlock import LOCK_FILE, MonitorLock
 
     backend = get_firewall()
     queued = 0
@@ -147,6 +150,8 @@ def cmd_status(args) -> int:
         queue = EventQueue(DATA_DIR / QUEUE_FILE)
         queued = len(queue)
         queue.close()
+    autostart_state = Autostart().state()
+    holder = MonitorLock(DATA_DIR / LOCK_FILE).holder()
     forwarding = {
         "enabled": settings.forwarding.enabled,
         "server_url": settings.forwarding.server_url,
@@ -163,6 +168,8 @@ def cmd_status(args) -> int:
         "detection_rules": DetectionEngine().rule_count,
         "data_dir": str(DATA_DIR),
         "forwarding": forwarding,
+        "watching": {"pid": holder.pid, "kind": holder.kind} if holder else None,
+        "starts_with_computer": autostart_state.enabled,
     }
     if args.json:
         print(json.dumps(info, indent=2))
@@ -179,6 +186,8 @@ def cmd_status(args) -> int:
     print(f"  Notifications      {info['notifications']}")
     print(f"  Detection rules    {info['detection_rules']}")
     print(f"  Forwarding         {forwarding_text}")
+    print(f"  Watching now       {holder.describe() if holder else 'nobody'}")
+    print(f"  Starts with PC     {'yes' if autostart_state.enabled else 'no'}")
     print(f"  Data directory     {info['data_dir']}")
     if not info["elevated"]:
         print(f"\n  Note: {privilege_hint()}")
@@ -198,7 +207,7 @@ def cmd_monitor(args) -> int:
     colour = _use_colour(sys.stdout) and not args.json
     engine = DetectionEngine(sigma_paths=args.sigma)
     service = SecurityService(engine=engine, auto_respond=args.auto_respond,
-                              forwarder=forwarder)
+                              forwarder=forwarder, kind="background")
     seen = threading.Event()
 
     def on_finding(finding: Finding) -> None:
@@ -217,6 +226,17 @@ def cmd_monitor(args) -> int:
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, lambda *_: stop.set())
 
+    service.start()
+    if service.read_only:
+        # Another Aegis already watches this computer; watching twice would
+        # double every alert and every row in the database.
+        holder = service.lock.holder() if service.lock else None
+        who = holder.describe() if holder else "another Aegis"
+        print(f"{who} is already watching this computer, so this one stopped.",
+              file=sys.stderr)
+        service.close()
+        return 0
+
     if not args.json:
         mode = "with auto-containment" if args.auto_respond else "detection only"
         detail = f"{engine.rule_count} rules"
@@ -226,8 +246,6 @@ def cmd_monitor(args) -> int:
             detail += f", exporting to SENTINEL-X at {forwarder.sender.url}"
         print(f"Aegis monitoring started ({mode}, {detail}). Press Ctrl+C to stop.\n",
               flush=True)
-
-    service.start()
     if forwarder is not None:
         _start_background_security_check(service)
     try:
@@ -350,6 +368,41 @@ def cmd_quarantine(args) -> int:
         return 0 if result.ok else 1
     finally:
         service.close()
+
+
+def cmd_autostart(args) -> int:
+    """Show, turn on or turn off starting Aegis with the computer."""
+    from aegis.autostart import Autostart
+
+    autostart = Autostart()
+    action = getattr(args, "autostart_command", None) or "status"
+    if action == "status":
+        state = autostart.state()
+        print(state.describe())
+        if state.command:
+            print(f"  Runs: {state.command}")
+        if not state.enabled and state.supported:
+            print("  Turn it on with: aegis autostart enable")
+        return 0
+
+    if action == "enable":
+        state = autostart.state()
+        if state.enabled:
+            print("Aegis already starts with this computer.")
+            return 0
+        print("Aegis will run its monitoring in the background whenever you sign in, "
+              "with no window. You can turn this off again at any time.")
+        if not _confirmed(args, "Start Aegis with this computer?"):
+            print("Cancelled. Nothing was changed.")
+            return 1
+        ok, message = autostart.enable(confirmed=True)
+    else:
+        if not _confirmed(args, "Stop Aegis starting with this computer?"):
+            print("Cancelled. Nothing was changed.")
+            return 1
+        ok, message = autostart.disable(confirmed=True)
+    print(message, file=sys.stdout if ok else sys.stderr)
+    return 0 if ok else 1
 
 
 def cmd_sigma(args) -> int:
@@ -914,6 +967,19 @@ def build_parser() -> argparse.ArgumentParser:
                               help="reason, recorded in the audit trail")
     p_quarantine.add_argument("--yes", action="store_true", help="confirm without asking")
     p_quarantine.set_defaults(func=cmd_quarantine)
+
+    p_auto = sub.add_parser(
+        "autostart", help="start watching automatically when you sign in",
+        description="Registers Aegis monitoring to start with this computer, using the "
+                    "ordinary per-user mechanism for this platform. No administrator "
+                    "rights are needed, and it can be removed again at any time.")
+    auto_sub = p_auto.add_subparsers(dest="autostart_command", metavar="ACTION")
+    auto_sub.add_parser("status", help="show whether Aegis starts with the computer (default)")
+    p_auto_on = auto_sub.add_parser("enable", help="start Aegis with the computer")
+    p_auto_on.add_argument("--yes", action="store_true", help="confirm without asking")
+    p_auto_off = auto_sub.add_parser("disable", help="stop Aegis starting with the computer")
+    p_auto_off.add_argument("--yes", action="store_true", help="confirm without asking")
+    p_auto.set_defaults(func=cmd_autostart)
 
     p_console = sub.add_parser("console", help="launch the desktop UI")
     p_console.set_defaults(func=cmd_console)

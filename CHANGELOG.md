@@ -6,6 +6,20 @@ All notable changes to Aegis are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Keeps watching after the window closes**: `aegis autostart enable`, or the
+  switch in Settings, registers monitoring to start at sign-in through each
+  platform's ordinary per-user mechanism (an `HKCU\...\Run` value, a systemd
+  user service, or a LaunchAgent). No administrator rights, reversible, and it
+  reports the exact command and location it wrote.
+- **One watcher per computer**: a lock file decides who monitors, so the
+  background service and an open window cannot both poll, store and alert. The
+  second one runs read-only and says who is watching; a lock left behind by a
+  crashed process is ignored after checking the live process table. `aegis
+  status` now shows who is watching and whether Aegis starts with the computer.
+- The packaged `Aegis.exe` accepts the same subcommands as `aegis`, so an
+  installed copy can register `Aegis.exe monitor` to run at sign-in.
+
 ### Planned
 - Sysmon / ETW collectors for kernel-grade telemetry (short-lived connections,
   in-memory techniques).

@@ -92,6 +92,8 @@ to SENTINEL-X when the user enables it.
 | `response/` | `FirewallBackend` contract with Windows (`netsh`), Linux (`nftables`) and macOS (`pf` anchor) engines; argument-list execution, never a shell. `NullFirewall` when no backend is usable. |
 | `storage/` | `EventStore` contract and its SQLite (WAL) implementation for events, findings, alerts, audit and fix history. |
 | `alerting/notifier.py` | Desktop notifications with cooldown de-duplication. |
+| `autostart.py` | Registers monitoring to start when the person signs in, using each platform's own per-user mechanism (HKCU Run, a systemd user service, a LaunchAgent). No administrator rights, always reversible, and it reports exactly what it wrote. |
+| `runlock.py` | One watcher per computer. Whoever starts first holds a lock file; a second Aegis opens read-only rather than duplicating every alert. A lock left by a crashed process is verified against the live process table, so a stale file cannot leave a computer unwatched. |
 | `service.py` | Orchestrator: collectors → engine → store / alert / response, the single façade the front ends use. |
 | `ui/` | Flet desktop app: dashboard, security check, connections, processes, detections, rules, audit, settings. |
 | `api/` | Local web dashboard (`aegis serve`): loopback only, token, Host allow-list, strict CSP. A view of this one computer. |

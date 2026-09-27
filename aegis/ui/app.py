@@ -222,6 +222,19 @@ class AegisApp:
         self.page.update()
 
     def sync_monitor_button(self) -> None:
+        if getattr(self.service, "read_only", False):
+            holder = self.service.lock.holder() if self.service.lock else None
+            self.monitor_btn.content = "Watched in the background"
+            self.monitor_btn.icon = ft.Icons.SHIELD_OUTLINED
+            self.monitor_btn.disabled = True
+            self.status_dot.color = theme.OK
+            self.status_text.value = "Watching"
+            self.status_text.tooltip = (
+                f"{holder.describe()} is watching this computer; this window shows what it "
+                f"records." if holder else "Another Aegis is watching this computer.")
+            return
+        self.monitor_btn.disabled = False
+        self.status_text.tooltip = None
         running = self.service.running
         self.monitor_btn.content = "Pause monitoring" if running else "Start monitoring"
         self.monitor_btn.icon = ft.Icons.PAUSE if running else ft.Icons.PLAY_ARROW

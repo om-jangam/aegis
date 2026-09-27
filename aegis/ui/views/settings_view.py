@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import flet as ft
 
+from aegis.autostart import Autostart
 from aegis.config import settings
 from aegis.core.models import Severity
 from aegis.ui import components as c
@@ -15,6 +16,12 @@ class SettingsView(BaseView):
     icon = ft.Icons.SETTINGS_OUTLINED
 
     def build(self) -> ft.Control:
+        self._autostart = Autostart()
+        state = self._autostart.state()
+        self.startup = ft.Switch(value=state.enabled, active_color=theme.PRIMARY,
+                                 disabled=not state.supported,
+                                 on_change=self._toggle_startup)
+        self.startup_detail = ft.Text(state.describe(), size=12, color=theme.TEXT_MUTED)
         self.monitoring = ft.Switch(value=settings.monitoring_enabled, active_color=theme.PRIMARY)
         self.threat_intel = ft.Switch(value=settings.threat_intel_enabled, active_color=theme.PRIMARY)
         self.anomaly = ft.Switch(value=settings.anomaly_detection_enabled, active_color=theme.PRIMARY)
@@ -46,6 +53,21 @@ class SettingsView(BaseView):
             c.section_title("Settings", ft.Icons.SETTINGS_OUTLINED),
             c.panel(ft.Column([
                 c.section_title("Protection", ft.Icons.SHIELD_OUTLINED),
+                ft.Container(ft.Column([
+                    ft.Row([
+                        ft.Column([
+                            ft.Text("Keep watching after I close this window", size=14,
+                                    color=theme.TEXT, weight=ft.FontWeight.W_600),
+                            ft.Text("Start Aegis monitoring whenever you sign in, with no "
+                                    "window. Needs no administrator rights, and can be "
+                                    "turned off here again.", size=12, color=theme.TEXT_MUTED),
+                        ], spacing=2, expand=True, tight=True),
+                        self.startup,
+                    ]),
+                    self.startup_detail,
+                ], spacing=6, tight=True),
+                    padding=ft.Padding.symmetric(horizontal=14, vertical=12),
+                    bgcolor=theme.SURFACE_ALT, border_radius=8),
                 row("Watch this computer",
                     "Keep checking network connections and running programs for signs of attack",
                     self.monitoring),
@@ -105,6 +127,24 @@ class SettingsView(BaseView):
             ft.FilledButton("Save settings", icon=ft.Icons.SAVE, on_click=self._save),
             ft.Container(height=20),
         ], spacing=14, scroll=ft.ScrollMode.AUTO, expand=True)
+
+    def _toggle_startup(self, e=None) -> None:
+        """Turn starting-with-the-computer on or off, and say what was written."""
+        wanted = self.startup.value
+        ok, message = (self._autostart.enable(confirmed=True) if wanted
+                       else self._autostart.disable(confirmed=True))
+        if not ok:
+            self.startup.value = not wanted        # put the switch back
+        state = self._autostart.state()
+        self.startup.value = state.enabled
+        self.startup_detail.value = state.describe()
+        self.service.audit("SYSTEM",
+                           "autostart_enabled" if state.enabled else "autostart_disabled",
+                           Severity.INFO,
+                           "Aegis starts with this computer" if state.enabled
+                           else "Aegis no longer starts with this computer", message)
+        self.app.toast(message, ok=ok)
+        self.safe_update()
 
     def refresh(self) -> None:
         self._render_trusted()
