@@ -42,13 +42,13 @@ Repository = "https://github.com/om-jangam/aegis"
 Issues = "https://github.com/om-jangam/aegis/issues"
 
 [project.optional-dependencies]
-ui = ["flet==0.86.*"]
+ui = ["flet>=0.86,<1.1"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.11",
-    "flet==0.86.*",
+    "flet>=0.86,<1.1",
 ]
 
 [project.scripts]
