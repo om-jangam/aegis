@@ -1,12 +1,14 @@
 """Main Aegis console (Flet 0.86): sidebar + content, wired to the service."""
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
 import flet as ft
 
 from aegis import __app_name__, __version__
+from aegis.autostart import Autostart
 from aegis.config import ASSETS_DIR, DATA_DIR, settings
 from aegis.service import SecurityService
 from aegis.ui import theme
@@ -19,6 +21,8 @@ from aegis.ui.views.processes_view import ProcessesView
 from aegis.ui.views.rules_view import RulesView
 from aegis.ui.views.security_check_view import SecurityCheckView
 from aegis.ui.views.settings_view import SettingsView
+
+log = logging.getLogger(__name__)
 
 _WELCOME_STEPS = (
     (ft.Icons.HEALTH_AND_SAFETY_OUTLINED, "Check your settings",
@@ -65,6 +69,8 @@ class AegisApp:
         self.navigate(0)
         if not settings.onboarding_done:
             self.show_welcome()
+        elif not settings.asked_about_background:
+            self.ask_about_background()
 
     def _configure_page(self) -> None:
         p = self.page
@@ -207,6 +213,53 @@ class AegisApp:
                 ft.FilledButton("Run my first security check",
                                 icon=ft.Icons.HEALTH_AND_SAFETY_OUTLINED,
                                 on_click=lambda e: finish(True)),
+            ]))
+
+    def close_for_restart(self) -> None:
+        """Shut down cleanly because an elevated copy of Aegis is starting."""
+        try:
+            self.service.close()
+        except Exception:  # noqa: BLE001 - closing must not raise on the way out
+            log.exception("Could not close the service before restarting")
+        try:
+            # close() is asynchronous; run_task hands it to the UI loop.
+            self.page.run_task(self.page.window.close)
+        except Exception:  # noqa: BLE001 - served in a browser: no window to close
+            self.toast("You can close this window; the new one is starting.", ok=True)
+
+    def ask_about_background(self) -> None:
+        """Ask once whether Aegis should keep watching after the window closes."""
+        autostart = Autostart()
+        if not autostart.state().supported or autostart.state().enabled:
+            settings.asked_about_background = True
+            settings.save()
+            return
+
+        def remember(answer: bool) -> None:
+            settings.asked_about_background = True
+            settings.save()
+            self.page.pop_dialog()
+            if answer:
+                ok, message = autostart.enable(confirmed=True)
+                self.toast(message, ok=ok)
+
+        self.page.show_dialog(ft.AlertDialog(
+            modal=True,
+            title=ft.Row([ft.Icon(ft.Icons.SHIELD_OUTLINED, color=theme.PRIMARY, size=26),
+                          ft.Text("Keep watching after you close this window?", size=20,
+                                  weight=ft.FontWeight.BOLD)], spacing=10),
+            content=ft.Column([
+                ft.Text("Right now Aegis only watches while this window is open, so "
+                        "closing it leaves the computer unwatched.", size=14),
+                ft.Text("If you say yes, monitoring starts quietly whenever you sign in, "
+                        "with no window. It needs no administrator rights, and you can "
+                        "turn it off in Settings at any time.", size=13,
+                        color=theme.TEXT_MUTED),
+            ], spacing=12, tight=True, width=470),
+            actions=[
+                ft.TextButton("Not now", on_click=lambda e: remember(False)),
+                ft.FilledButton("Keep watching", icon=ft.Icons.SHIELD_OUTLINED,
+                                on_click=lambda e: remember(True)),
             ]))
 
     # -- monitor toggle ----------------------------------------------------- #

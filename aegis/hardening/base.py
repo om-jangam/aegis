@@ -137,6 +137,10 @@ class Fix(abc.ABC):
     requires_admin: bool = True
     #: Whether undo restores everything. A partial undo is explained in ``effect``.
     reversible: bool = True
+    #: Whether "fix the safe ones" may apply this without asking about it on its
+    #: own. False for anything that could cut somebody off from their computer,
+    #: or that cannot be fully undone: those deserve a separate, deliberate yes.
+    routine: bool = True
     #: Set when the change only fully applies after a restart.
     restart_note: str = ""
 

@@ -123,6 +123,31 @@ class HardeningEngine:
         return HardeningResult(fix.fix_id, fix.title, Outcome.PREVIEW,
                                "Nothing has been changed.", changes)
 
+    def routine_fixes(self, report: PostureReport) -> list[tuple[Fix, list[Change]]]:
+        """The fixes a person can safely accept in one go.
+
+        Everything here is reversible, changes a setting rather than cutting
+        access, and has something to change right now. Anything that could lock
+        somebody out of their own computer is left out on purpose: those are
+        offered one at a time, with their own explanation.
+        """
+        ready: list[tuple[Fix, list[Change]]] = []
+        for recommendation in self.recommendations(report):
+            for fix, changes in recommendation.fixes:
+                if fix.routine and fix.reversible:
+                    ready.append((fix, changes))
+        return ready
+
+    def apply_routine(self, report: PostureReport, *,
+                      confirmed: bool = False) -> list[HardeningResult]:
+        """Apply every routine fix, one after another, each recorded separately."""
+        ready = self.routine_fixes(report)
+        if not confirmed:
+            return [HardeningResult(fix.fix_id, fix.title, Outcome.NEEDS_CONFIRMATION,
+                                    "Review the changes and confirm to apply them.", changes)
+                    for fix, changes in ready]
+        return [self.apply(fix.fix_id, confirmed=True) for fix, _ in ready]
+
     def apply(self, fix_id: str, *, confirmed: bool = False) -> HardeningResult:
         fix = self._require(fix_id)
         planned = self.preview(fix_id)

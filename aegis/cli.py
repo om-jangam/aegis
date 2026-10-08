@@ -561,6 +561,38 @@ def _harden_apply(engine, args) -> int:
     return 0 if result.ok else 1
 
 
+def _harden_apply_safe(engine, args) -> int:
+    """Apply every fix that is safe to accept in one go."""
+    from aegis.hardening import Outcome
+    from aegis.posture import run_posture_checks
+
+    ready = engine.routine_fixes(run_posture_checks(engine.ctx))
+    if not ready:
+        print("Nothing to fix: every weakness Aegis can fix safely is already fixed.")
+        return 0
+
+    print(f"{len(ready)} fix(es) can be applied safely. Each one can be undone.\n")
+    for fix, changes in ready:
+        admin = " (needs admin)" if fix.requires_admin else ""
+        print(f"  {fix.fix_id}: {fix.title}{admin}")
+        _print_changes(changes)
+        print(f"    After: {fix.effect}")
+    if args.dry_run:
+        print("\nDry run: nothing was changed.")
+        return 0
+    if not _confirmed(args, f"\nApply {len(ready)} fix(es)?"):
+        print("Cancelled. Nothing was changed.")
+        return 1
+
+    results = engine.apply_routine(run_posture_checks(engine.ctx), confirmed=True)
+    fixed = sum(1 for r in results if r.outcome is Outcome.FIXED)
+    print()
+    for result in results:
+        print(f"{result.outcome.value.upper():<14} {result.title}: {result.message}")
+    print(f"\n{fixed} of {len(results)} fixed. Undo any of them with: aegis harden undo <id>")
+    return 0 if fixed == len(results) else 1
+
+
 def _harden_undo(engine, args) -> int:
     from aegis.hardening import Outcome
 
@@ -617,7 +649,8 @@ def _harden_list(engine, args) -> int:
 
 def cmd_harden(args) -> int:
     """Fix the weaknesses the security check found: explain, confirm, apply, verify, record."""
-    handlers = {"history": _harden_history, "apply": _harden_apply, "undo": _harden_undo}
+    handlers = {"history": _harden_history, "apply": _harden_apply, "undo": _harden_undo,
+                "apply-safe": _harden_apply_safe}
     engine = _hardening_engine()
     try:
         action = getattr(args, "harden_command", None) or "list"
@@ -894,6 +927,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_apply.add_argument("--dry-run", action="store_true",
                          help="show what would change without changing anything")
     p_apply.add_argument("--yes", action="store_true", help="confirm without asking")
+    p_safe = harden_sub.add_parser(
+        "apply-safe", help="apply every fix that is safe to accept in one go",
+        description="Applies the fixes that are reversible and cannot cut anybody off "
+                    "from this computer. Fixes that could (turning off Remote Desktop, "
+                    "deleting a stored password, changing SSH) are left for you to "
+                    "decide one at a time.")
+    p_safe.add_argument("--dry-run", action="store_true",
+                        help="show what would change without changing anything")
+    p_safe.add_argument("--yes", action="store_true", help="confirm without asking")
+
     p_undo = harden_sub.add_parser("undo", help="put back the settings from before a fix")
     p_undo.add_argument("record_id", type=int, help="the history record number")
     p_undo.add_argument("--yes", action="store_true", help="confirm without asking")

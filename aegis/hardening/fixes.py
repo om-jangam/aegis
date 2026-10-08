@@ -123,6 +123,7 @@ class MacFirewallFix(Fix):
 
 
 class UfwFirewallFix(Fix):
+    routine = False          # a remote session could end with the wrong rules
     fix_id = "FIX-LINUX-UFW"
     check_id = "POSTURE-FIREWALL"
     title = "Turn on the ufw firewall"
@@ -206,6 +207,7 @@ class RemoteDesktopNlaFix(RegistryFix):
 
 
 class RemoteDesktopOffFix(RegistryFix):
+    routine = False          # could cut off somebody working remotely
     fix_id = "FIX-WIN-RDP-OFF"
     check_id = RemoteDesktopCheck.check_id
     title = "Turn off Remote Desktop"
@@ -242,6 +244,7 @@ class AutoLogonFix(RegistryFix):
               "sign-in back on but cannot bring the password back. Change that password, "
               "since it was readable.")
     reversible = False
+    routine = False          # the deleted password cannot be restored
     VALUES = (
         RegistryValue(AutoLogonCheck._KEY, "AutoAdminLogon", "0", kind="sz"),
         RegistryValue(AutoLogonCheck._KEY, "DefaultPassword", None, kind="sz", secret=True),
@@ -387,6 +390,7 @@ def _without_aegis_block(text: str) -> str:
 
 
 class SSHLoginFix(Fix):
+    routine = False          # SSH is often the only way in to a machine
     fix_id = "FIX-SSH-LOGIN"
     check_id = SSHHardeningCheck.check_id
     title = "Stop root and empty-password logins over SSH"

@@ -6,6 +6,7 @@ import logging
 import flet as ft
 
 from aegis.config import settings
+from aegis.elevate import can_elevate, restart_as_admin
 from aegis.intel import get_intel, intel_dir, reset_cache
 from aegis.posture import CheckStatus, run_posture_checks
 from aegis.posture.base import PostureReport
@@ -14,6 +15,13 @@ from aegis.ui import theme
 from aegis.ui.views.base import BaseView
 
 log = logging.getLogger(__name__)
+
+
+class SimpleResult:
+    """What ``_run_fix`` needs from a result: did it work, and what to say."""
+
+    def __init__(self, ok: bool, message: str, title: str):
+        self.ok, self.message, self.title = ok, message, title
 
 _STATUS = {
     CheckStatus.FAIL: (ft.Icons.CANCEL, theme.DANGER, "FAIL"),
@@ -39,6 +47,7 @@ class SecurityCheckView(BaseView):
     def build(self) -> ft.Control:
         self._report: PostureReport | None = None
         self._fixes: dict[str, list] = {}
+        self._routine: list = []
         self._checking = False
         self._fixing = False
         self._updating_intel = False
@@ -48,11 +57,15 @@ class SecurityCheckView(BaseView):
         self.counts = ft.Text("", size=12, color=theme.TEXT_MUTED)
         self.check_progress = ft.ProgressRing(width=18, height=18, stroke_width=2, visible=False)
         self.run_btn = ft.FilledButton("Run check", icon=ft.Icons.REFRESH, on_click=self.run_check)
+        self.fix_all_btn = ft.FilledButton("Fix the safe ones", icon=ft.Icons.AUTO_FIX_HIGH,
+                                           visible=False, on_click=self._confirm_fix_all)
+        self.admin_banner = self._admin_banner()
         score_panel = c.panel(ft.Row([
             ft.Column([ft.Text("Security score", size=12, color=theme.TEXT_MUTED),
                        self.score, self.grade], spacing=2, tight=True),
             ft.Container(expand=True),
-            ft.Column([self.counts, ft.Row([self.check_progress, self.run_btn], spacing=10)],
+            ft.Column([self.counts, ft.Row([self.check_progress, self.fix_all_btn,
+                                            self.run_btn], spacing=10)],
                       horizontal_alignment=ft.CrossAxisAlignment.END, spacing=8, tight=True),
         ], vertical_alignment=ft.CrossAxisAlignment.CENTER), expand=True)
 
@@ -77,6 +90,7 @@ class SecurityCheckView(BaseView):
             ft.Text("The check only reads settings. A fix changes a setting only after you "
                     "confirm, is verified afterwards, and can be undone below.",
                     size=12, color=theme.TEXT_MUTED),
+            self.admin_banner,
             c.panel(self.results, padding=6, expand=True),
             c.panel(ft.Column([c.section_title("Fix history", ft.Icons.HISTORY), self.history],
                               spacing=6, tight=True), padding=10),
@@ -112,6 +126,10 @@ class SecurityCheckView(BaseView):
                 log.exception("Could not work out the available fixes")
                 recommendations = []
             self._fixes = {rec.check.check_id: rec.fixes for rec in recommendations}
+            self._routine = self.service.hardening.routine_fixes(report)
+            self.fix_all_btn.visible = bool(self._routine)
+            self.fix_all_btn.content = (f"Fix the safe ones ({len(self._routine)})"
+                                        if self._routine else "Fix the safe ones")
             self._render(report)
             self.app.posture_updated(report)
         finally:
@@ -209,6 +227,75 @@ class SecurityCheckView(BaseView):
                      ft.FilledButton("Apply fix", icon=ft.Icons.BUILD,
                                      disabled=fix.requires_admin and not elevated,
                                      on_click=apply)]))
+
+    def _admin_banner(self) -> ft.Control:
+        """Offered only when a restart would actually change what Aegis can do."""
+        if not can_elevate():
+            return ft.Container(height=0)
+        return ft.Container(
+            content=ft.Row([
+                ft.Icon(ft.Icons.ADMIN_PANEL_SETTINGS_OUTLINED, color=theme.WARN, size=20),
+                ft.Text("Some checks and fixes need administrator rights. Aegis works "
+                        "without them, but cannot change firewall settings or read "
+                        "sign-in history.", size=12, color=theme.TEXT, expand=True),
+                ft.FilledButton("Restart as administrator", icon=ft.Icons.SHIELD_OUTLINED,
+                                on_click=self._restart_as_admin),
+            ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=10),
+            bgcolor=ft.Colors.with_opacity(0.12, theme.WARN), border_radius=8,
+            border=ft.Border.all(1, ft.Colors.with_opacity(0.4, theme.WARN)))
+
+    def _restart_as_admin(self, e=None) -> None:
+        """Ask Windows to start Aegis again with administrator rights."""
+        result = restart_as_admin(confirmed=True)
+        self.app.toast(result.message, ok=result.ok)
+        if result.restarting:
+            self.app.close_for_restart()
+
+    def _confirm_fix_all(self, e=None) -> None:
+        """Show every routine fix, then apply them all on one confirmation."""
+        if not self._routine:
+            return
+        lines: list[ft.Control] = [
+            ft.Text(f"{len(self._routine)} weaknesses can be fixed safely. Each one is "
+                    f"applied, checked, and can be undone from Fix history.", size=13,
+                    color=theme.TEXT),
+        ]
+        for fix, changes in self._routine:
+            lines.append(ft.Text(fix.title, size=13, color=theme.TEXT,
+                                 weight=ft.FontWeight.W_600))
+            lines.extend(ft.Text(f"    {c.setting}: {c.current}  ->  {c.target}", size=11,
+                                 color=theme.TEXT_MUTED, selectable=True) for c in changes)
+        lines.append(ft.Text("Anything that could lock you out of this computer is not "
+                             "included here; those are offered one at a time.", size=12,
+                             color=theme.TEXT_MUTED))
+
+        def apply(e):
+            self.page.pop_dialog()
+            self._run_fix(self._apply_routine)
+
+        self.page.show_dialog(ft.AlertDialog(
+            modal=True, title=ft.Text("Fix the safe ones?"),
+            content=ft.Container(ft.Column(lines, spacing=6, tight=True,
+                                           scroll=ft.ScrollMode.AUTO), width=560),
+            actions=[ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog()),
+                     ft.FilledButton("Fix them", icon=ft.Icons.AUTO_FIX_HIGH,
+                                     on_click=apply)]))
+
+    def _apply_routine(self):
+        """Apply every routine fix and sum the outcome up in one sentence."""
+        from aegis.hardening import Outcome
+
+        results = self.service.hardening.apply_routine(self._report, confirmed=True)
+        fixed = sum(1 for r in results if r.outcome is Outcome.FIXED)
+        if not results:
+            return SimpleResult(True, "Nothing needed fixing.", "Security check")
+        if fixed == len(results):
+            return SimpleResult(True, f"Fixed {fixed} of {len(results)}. Undo any of them "
+                                      f"in Fix history.", "Security check")
+        failed = next(r for r in results if r.outcome is not Outcome.FIXED)
+        return SimpleResult(False, f"Fixed {fixed} of {len(results)}. {failed.title}: "
+                                   f"{failed.message}", "Security check")
 
     def _confirm_undo(self, record) -> None:
         def undo(e):
