@@ -362,9 +362,17 @@ class SecurityCheckView(BaseView):
     def _show_history(self) -> None:
         try:
             records = self.service.hardening.history(30)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - report it, never hide it
+            # Undo lives in this panel. Showing "No fixes applied yet" here
+            # would make every undo button vanish without a word, and tell
+            # somebody their fixes were never recorded when they were.
             log.exception("Could not read the fix history")
-            records = []
+            self.history.controls = [ft.Text(
+                f"Could not read the fix history: {exc}. Any fix you applied is "
+                f"still recorded - reopen Aegis to see it and undo it.",
+                size=12, color=theme.WARN)]
+            self.safe_update()
+            return
         self.history.controls = [self._history_row(r) for r in records] or [
             ft.Text("No fixes applied yet.", size=12, color=theme.TEXT_MUTED)]
         self.safe_update()

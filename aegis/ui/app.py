@@ -216,16 +216,24 @@ class AegisApp:
             ]))
 
     def close_for_restart(self) -> None:
-        """Shut down cleanly because an elevated copy of Aegis is starting."""
+        """Hand monitoring over to an elevated copy of Aegis that is starting.
+
+        Windows reports that it created a process, not that Aegis is running
+        inside it. Nothing this copy owns may be destroyed on that promise: if
+        the new copy fails to start, closing the database left a drawn window
+        whose every read failed, and closing the window would have left nothing
+        at all. So this copy only stops watching - the new one cannot watch
+        while this one holds the single-watcher lock - and says what happened.
+        Start monitoring brings it back if the new copy never appears.
+        """
         try:
-            self.service.close()
-        except Exception:  # noqa: BLE001 - closing must not raise on the way out
-            log.exception("Could not close the service before restarting")
-        try:
-            # close() is asynchronous; run_task hands it to the UI loop.
-            self.page.run_task(self.page.window.close)
-        except Exception:  # noqa: BLE001 - served in a browser: no window to close
-            self.toast("You can close this window; the new one is starting.", ok=True)
+            self.service.stop()
+        except Exception:  # noqa: BLE001 - the handover must not raise
+            log.exception("Could not stop monitoring before the restart")
+        self.sync_monitor_button()      # the header must stop saying "Watching"
+        self.toast("Aegis is opening a new window with administrator rights. Use "
+                   "that one; this one has stopped watching and can be closed.",
+                   ok=True)
 
     def ask_about_background(self) -> None:
         """Ask once whether Aegis should keep watching after the window closes."""
