@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 
 import flet as ft
 
@@ -51,6 +52,8 @@ class SecurityCheckView(BaseView):
         self._checking = False
         self._fixing = False
         self._updating_intel = False
+        self._checking_vulns = False
+        self._stop_vulns = threading.Event()
 
         self.score = ft.Text("-", size=40, weight=ft.FontWeight.BOLD, color=theme.TEXT)
         self.grade = ft.Text("Not run yet", size=13, color=theme.TEXT_MUTED)
@@ -81,6 +84,23 @@ class SecurityCheckView(BaseView):
             self.intel_progress, self.intel_btn,
         ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER), expand=True)
 
+        self.vuln_count = ft.Text("-", size=14, color=theme.TEXT, weight=ft.FontWeight.W_600)
+        self.vuln_detail = ft.Text("", size=11, color=theme.TEXT_MUTED)
+        self.vuln_progress = ft.ProgressRing(width=18, height=18, stroke_width=2,
+                                             visible=False)
+        self.vuln_btn = ft.OutlinedButton("Check installed programs",
+                                          icon=ft.Icons.INVENTORY_2_OUTLINED,
+                                          on_click=self._confirm_vuln_check)
+        self.vuln_stop_btn = ft.TextButton("Stop", icon=ft.Icons.STOP_CIRCLE_OUTLINED,
+                                           visible=False, on_click=self._stop_vuln_check)
+        vuln_panel = c.panel(ft.Row([
+            ft.Icon(ft.Icons.INVENTORY_2_OUTLINED, color=theme.PRIMARY, size=28),
+            ft.Column([ft.Text("Installed programs", size=12, color=theme.TEXT_MUTED),
+                       self.vuln_count, self.vuln_detail],
+                      spacing=2, tight=True, expand=True),
+            self.vuln_progress, self.vuln_stop_btn, self.vuln_btn,
+        ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER))
+
         self.results = ft.ListView(spacing=8, expand=True, padding=4)
         self.results.controls = [c.empty_state("Running the security check...",
                                                ft.Icons.HEALTH_AND_SAFETY_OUTLINED)]
@@ -91,6 +111,7 @@ class SecurityCheckView(BaseView):
                     "confirm, is verified afterwards, and can be undone below.",
                     size=12, color=theme.TEXT_MUTED),
             self.admin_banner,
+            vuln_panel,
             c.panel(self.results, padding=6, expand=True),
             c.panel(ft.Column([c.section_title("Fix history", ft.Icons.HISTORY), self.history],
                               spacing=6, tight=True), padding=10),
@@ -98,6 +119,7 @@ class SecurityCheckView(BaseView):
 
     def refresh(self) -> None:
         self._show_intel()
+        self._show_vulns()
         self._show_history()
         if self._report is None and not self._checking:
             self.run_check()
@@ -407,4 +429,132 @@ class SecurityCheckView(BaseView):
         self._updating_intel = busy
         self.intel_progress.visible = busy
         self.intel_btn.disabled = busy
+        self.safe_update()
+
+    # -- known vulnerabilities in installed programs ------------------------ #
+    def _show_vulns(self) -> None:
+        """Summarise what the last lookup found, without asking anything."""
+        from aegis.intel.vulns import VulnerabilityCache
+
+        reports = VulnerabilityCache.read().reports()
+        vulnerable = [r for r in reports if r.vulnerabilities]
+        if not reports:
+            self.vuln_count.value = "Not checked yet"
+            self.vuln_detail.value = ("Unpatched programs are how most computers are "
+                                      "broken into. Aegis can ask the public "
+                                      "vulnerability database about the versions "
+                                      "installed here.")
+        elif vulnerable:
+            total = sum(len(r.vulnerabilities) for r in vulnerable)
+            self.vuln_count.value = (f"{len(vulnerable)} program(s) with known "
+                                     f"vulnerabilities ({total} in total)")
+            self.vuln_detail.value = ", ".join(
+                f"{r.name} {r.version} ({r.worst.lower()})" for r in vulnerable[:4])
+        else:
+            checked = sum(1 for r in reports if r.matched)
+            self.vuln_count.value = f"Nothing known against {checked} program(s)"
+            self.vuln_detail.value = (f"{len(reports) - checked} program(s) are not in "
+                                      f"the database, so they could not be checked.")
+
+    def _confirm_vuln_check(self, e=None) -> None:
+        """Explain exactly what is sent and how long it takes, then ask."""
+        from aegis.intel.vulns import API_KEY_ENV, api_key
+        from aegis.software import installed_programs, is_interesting
+
+        try:
+            programs = [p for p in installed_programs() if is_interesting(p)]
+        except Exception:  # noqa: BLE001 - reading the list must not break the view
+            log.exception("Could not list the installed programs")
+            self.app.toast("Could not read the list of installed programs.", ok=False)
+            return
+        if not programs:
+            self.app.toast("No installed programs with a version number were found.",
+                           ok=False)
+            return
+
+        minutes = max(1, round(len(programs) * 2 * (0.7 if api_key() else 6.5) / 60))
+        lines: list[ft.Control] = [
+            ft.Text(f"{len(programs)} installed program(s) can be looked up in the "
+                    f"National Vulnerability Database, the free public record run by "
+                    f"the US government.", size=13, color=theme.TEXT),
+            ft.Text("Only a program name and a version number are sent, over HTTPS. "
+                    "No file contents, no identifiers, nothing about this computer.",
+                    size=12, color=theme.TEXT_MUTED),
+            ft.Text(f"The database allows only a few questions per minute, so this "
+                    f"takes about {minutes} minute(s). You can keep using Aegis while "
+                    f"it runs, and stop it at any time: answers already received are "
+                    f"kept." + ("" if api_key() else
+                                f" Setting {API_KEY_ENV} makes it much faster."),
+                    size=12, color=theme.TEXT_MUTED),
+        ]
+
+        def start(e):
+            self.page.pop_dialog()
+            self._start_vuln_check(len(programs))
+
+        self.page.show_dialog(ft.AlertDialog(
+            modal=True, title=ft.Text("Check installed programs?"),
+            content=ft.Container(ft.Column(lines, spacing=10, tight=True), width=520),
+            actions=[ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog()),
+                     ft.FilledButton("Check them", icon=ft.Icons.INVENTORY_2_OUTLINED,
+                                     on_click=start)]))
+
+    def _start_vuln_check(self, total: int) -> None:
+        if self._checking_vulns:
+            return
+        self._stop_vulns.clear()
+        self._set_checking_vulns(True)
+        self.vuln_count.value = f"Checking 0 of {total}..."
+        self.vuln_detail.value = "Waiting for the database."
+        self.safe_update()
+        self.page.run_thread(lambda: self._vuln_worker(total))
+
+    def _vuln_worker(self, total: int) -> None:
+        from aegis.intel.vulns import NvdClient, VulnerabilityCache, refresh
+        from aegis.software import installed_programs
+
+        done = 0
+
+        def progress(line: str) -> None:
+            nonlocal done
+            done += 1
+            self.vuln_count.value = f"Checking {done} of {total}..."
+            self.vuln_detail.value = line.strip()
+            self.safe_update()
+
+        cache = VulnerabilityCache.read()
+        try:
+            summary = refresh(installed_programs(), cache=cache, client=NvdClient(),
+                              limit=total, progress=progress,
+                              should_stop=self._stop_vulns.is_set)
+            cache.save()
+        except Exception:  # noqa: BLE001 - report instead of freezing the panel
+            log.exception("Looking up installed programs failed")
+            self.app.toast("Could not finish checking the installed programs.", ok=False)
+        else:
+            if summary.stopped:
+                message = (f"Stopped. {summary.checked} program(s) were checked and "
+                           f"their answers kept.")
+            elif summary.failed:
+                message = (f"Checked {summary.checked}; {summary.failed} could not reach "
+                           f"the database. Run it again to retry those.")
+            else:
+                message = (f"Checked {summary.checked} program(s). "
+                           f"{summary.vulnerable} have known vulnerabilities.")
+            self.app.toast(message, ok=not summary.failed)
+            self.run_check()        # the score includes this now, so re-run it
+        finally:
+            self._show_vulns()
+            self._set_checking_vulns(False)
+
+    def _stop_vuln_check(self, e=None) -> None:
+        self._stop_vulns.set()
+        self.vuln_detail.value = "Stopping after the current program..."
+        self.safe_update()
+
+    def _set_checking_vulns(self, busy: bool) -> None:
+        self._checking_vulns = busy
+        self.vuln_progress.visible = busy
+        self.vuln_btn.disabled = busy
+        self.vuln_stop_btn.visible = busy
         self.safe_update()

@@ -719,6 +719,94 @@ def cmd_intel(args) -> int:
     return 0
 
 
+def cmd_vulns(args) -> int:
+    """List installed programs and what is publicly known about them."""
+    from aegis.intel.vulns import (
+        API_KEY_ENV,
+        NvdClient,
+        VulnerabilityCache,
+        api_key,
+        cache_path,
+        refresh,
+    )
+    from aegis.software import installed_programs, is_interesting
+
+    action = getattr(args, "vulns_command", None) or "report"
+    cache = VulnerabilityCache.read()
+
+    if action == "list":
+        programs = installed_programs()
+        if args.json:
+            print(json.dumps([p.to_dict() for p in programs], indent=2))
+            return 0
+        print(f"{len(programs)} installed program(s):\n")
+        for program in programs:
+            mark = " " if is_interesting(program) else "-"
+            print(f"{mark} {program.product:<44}{program.version:<20}{program.publisher}")
+        print("\nLines marked '-' are part of Windows or lack a version, so they are "
+              "not looked up.")
+        return 0
+
+    if action == "check":
+        programs = installed_programs()
+        pending = [p for p in programs if is_interesting(p)]
+        print(f"{len(programs)} installed program(s), {len(pending)} worth looking up.")
+        print("Only a program name and a version number are sent, to the US National "
+              "Vulnerability Database, over HTTPS.")
+        if not api_key():
+            print(f"Without an API key the database allows 5 questions per 30 seconds, "
+                  f"so this takes a while. Set {API_KEY_ENV} for a faster limit "
+                  f"(free from nvd.nist.gov).")
+        if not _confirmed(args, f"\nLook up {min(len(pending), args.limit)} program(s)?"):
+            print("Cancelled. Nothing was sent.")
+            return 1
+
+        print()
+        summary = refresh(programs, cache=cache, client=NvdClient(), limit=args.limit,
+                          progress=lambda line: print(line, flush=True))
+        path = cache.save()
+        print(f"\nLooked up {summary.checked}, reused {summary.from_cache} cached answer(s), "
+              f"{summary.unmatched} not in the database, {summary.failed} failed.")
+        print(f"{summary.vulnerable} program(s) have known vulnerabilities. "
+              f"Saved to {path}")
+        if summary.forgotten:
+            print(f"Forgot {summary.forgotten} program(s) that are no longer installed.")
+        if summary.remaining:
+            print(f"{summary.remaining} program(s) not reached this run; "
+                  f"run the same command again to continue.")
+        return 0
+
+    # report: whatever is already known, without touching the network
+    reports = cache.reports()
+    if args.json:
+        print(json.dumps({"cache": str(cache_path()), "updated": cache.updated,
+                          "programs": [r.to_dict() for r in reports]}, indent=2))
+        return 0
+    if not reports:
+        print("Nothing looked up yet. Run `aegis vulns check` to ask the public "
+              "vulnerability database about the programs installed here.")
+        return 0
+
+    vulnerable = [r for r in reports if r.vulnerabilities]
+    print(f"Answers from {cache.updated or 'an unknown time'} "
+          f"({int(cache.age_days())} day(s) old)\n")
+    for report in vulnerable:
+        print(f"{report.name} {report.version}  [{report.product}]")
+        if report.truncated:
+            print(f"    The database lists {report.listed} entries for this version; "
+                  f"only the first {len(report.vulnerabilities)} that name it as "
+                  f"vulnerable are shown.")
+        for vuln in report.vulnerabilities:
+            print(f"    {vuln.severity:<9}{vuln.score:<5}{vuln.cve_id:<18}{vuln.summary[:90]}")
+            print(f"    {' ':14}{vuln.url}")
+        print()
+    clean = len(reports) - len(vulnerable)
+    unmatched = sum(1 for r in reports if not r.matched)
+    print(f"{len(vulnerable)} program(s) with known vulnerabilities, "
+          f"{clean - unmatched} with none, {unmatched} not in the database.")
+    return 0 if not vulnerable else 1
+
+
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 
@@ -958,6 +1046,28 @@ def build_parser() -> argparse.ArgumentParser:
         "lookup", help="check whether an IP is listed (exit 0 if listed, 1 if not)")
     p_intel_lookup.add_argument("ip")
     p_intel_lookup.add_argument("--json", action="store_true", help="machine-readable output")
+
+    p_vulns = sub.add_parser(
+        "vulns", help="check installed programs for publicly known vulnerabilities",
+        description="Unpatched software is how most computers are actually broken into. "
+                    "These commands list what is installed here and look it up in the US "
+                    "National Vulnerability Database. Only a program name and a version "
+                    "number are ever sent; no file contents, and nothing about this "
+                    "computer. Answers are cached, and the security check reads only the "
+                    "cache, so it never touches the network.")
+    p_vulns.set_defaults(func=cmd_vulns, vulns_command=None, json=False)
+    vulns_sub = p_vulns.add_subparsers(dest="vulns_command")
+    p_vulns_report = vulns_sub.add_parser(
+        "report", help="show what is already known, without using the network")
+    p_vulns_report.add_argument("--json", action="store_true",
+                                help="machine-readable output")
+    p_vulns_list = vulns_sub.add_parser("list", help="list the installed programs")
+    p_vulns_list.add_argument("--json", action="store_true", help="machine-readable output")
+    p_vulns_check = vulns_sub.add_parser(
+        "check", help="look the installed programs up in the vulnerability database")
+    p_vulns_check.add_argument("--limit", type=int, default=40, metavar="N",
+                               help="how many programs to look up in one run (default 40)")
+    p_vulns_check.add_argument("--yes", action="store_true", help="confirm without asking")
 
     p_serve = sub.add_parser(
         "serve", help="open the web dashboard in your browser",

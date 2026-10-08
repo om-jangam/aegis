@@ -99,6 +99,9 @@ Every command starts with `.venv\Scripts\python -m aegis` from inside `D:\aegis`
 | `... -m aegis harden` | Lists weaknesses that Aegis can fix, and the exact change each fix makes |
 | `... -m aegis harden apply FIX-WIN-SMB1` | Applies one fix, after showing you what it changes and asking |
 | `... -m aegis harden undo 1` | Undoes fix number 1 |
+| `... -m aegis harden apply-safe` | Applies every fix that cannot lock you out, after showing you all of them |
+| `... -m aegis vulns check` | Asks the public vulnerability database whether any installed program has a known flaw. Slow: the database allows only a few questions per minute |
+| `... -m aegis vulns report` | Shows what that check found last time, without using the internet |
 | `... -m aegis monitor` | Watches the computer in the terminal, printing anything suspicious. Press `Ctrl+C` to stop |
 | `... -m aegis serve` | Opens the web dashboard in your browser |
 | `... -m aegis report` | Writes a shareable HTML report you can email or print |
@@ -127,7 +130,7 @@ D:\aegis\
 │   ├── ui\             the app window
 │   ├── api\            the web dashboard
 │   └── cli.py          the commands above
-├── tests\              proves the program works (781 automatic tests)
+├── tests\              proves the program works (870 automatic tests)
 ├── docs\               architecture, detections, threat model, this guide
 ├── packaging\          builds the Windows installer
 ├── dist\               the built app and installer
@@ -158,7 +161,7 @@ Deleting that folder resets Aegis completely. Nothing there leaves the computer.
 ## 7. Checking the project is healthy
 
 ```bash
-.venv\Scripts\python -m pytest          # runs 781 tests; all must pass
+.venv\Scripts\python -m pytest          # runs 870 tests; all must pass
 .venv\Scripts\python -m ruff check aegis tests    # checks code style
 .venv\Scripts\python -m mypy            # checks for type mistakes
 ```
@@ -182,10 +185,10 @@ Useful before a demo: if the tests pass, the project works.
 ## 9. Explaining it in a viva, in four sentences
 
 > Aegis is an endpoint security tool written in Python that protects a single
-> computer. It runs 16 read-only checks of the machine's security settings and
+> computer. It runs 17 read-only checks of the machine's security settings and
 > scores them, then fixes the weak ones through a flow that explains the risk,
 > asks permission, backs up, applies, verifies and can undo. While running it
 > watches network connections, programs, files, sign-ins and DNS lookups against
 > 33 detection rules mapped to MITRE ATT&CK, and can block an address, stop a
 > program or quarantine a file. Every action it takes is recorded in an audit
-> trail, and 781 automated tests run on Windows, Linux and macOS on every change.
+> trail, and 870 automated tests run on Windows, Linux and macOS on every change.

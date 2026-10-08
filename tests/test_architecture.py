@@ -44,3 +44,8 @@ def test_export_depends_only_on_the_engine():
 
 def test_service_does_not_import_front_ends():
     assert _violations([PACKAGE / "service.py"], ("aegis.ui", "aegis.api", "aegis.cli")) == []
+
+
+def test_the_installed_software_inventory_belongs_to_the_engine():
+    """The security check reads it, so it may not depend on a front end."""
+    assert _violations([PACKAGE / "software.py"], FRONT_ENDS) == []

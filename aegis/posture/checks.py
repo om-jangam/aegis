@@ -881,6 +881,82 @@ class ScreenLockCheck(PostureCheck):
                            f"The screen locks after {minutes or 1} minute(s) of inactivity.")
 
 
+#: Worst first, so the lowest index is the most serious.
+_SEVERITY_ORDER = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+
+
+class VulnerableSoftwareCheck(PostureCheck):
+    """Installed programs with a publicly known flaw in the version installed.
+
+    Reads only what ``aegis vulns check`` already wrote. A posture check must
+    work offline, finish immediately, and give the same answer twice, so it
+    never asks the database itself.
+    """
+
+    check_id = "POSTURE-VULN-SOFTWARE"
+    title = "Installed programs have no known vulnerabilities"
+    category = "Patching"
+    severity = Severity.HIGH
+    remediation = ("Update the programs listed above to their latest version, or remove "
+                   "the ones you no longer use. Re-run `aegis vulns check` afterwards.")
+    #: Flaws are published constantly, so an old answer is worth re-asking.
+    STALE_DAYS = 30
+    #: How many programs to name before summarising the rest.
+    SHOWN = 6
+
+    def run(self, ctx: PostureContext) -> CheckResult:
+        from aegis.intel.vulns import VulnerabilityCache, cache_path
+
+        cache = VulnerabilityCache.load(ctx.read_text(str(cache_path())))
+        reports = cache.reports()
+        if not reports:
+            # A skipped check carries no remediation, so the instruction has to
+            # be in the summary or nobody ever sees it.
+            return self.result(
+                CheckStatus.SKIP,
+                "Installed programs have not been checked against the public "
+                "vulnerability database yet. Run `aegis vulns check` to look them up.")
+
+        vulnerable = [r for r in reports if r.vulnerabilities]
+        unmatched = [r for r in reports if not r.matched]
+        details = [self._line(r) for r in vulnerable[:self.SHOWN]]
+        if len(vulnerable) > self.SHOWN:
+            details.append(f"...and {len(vulnerable) - self.SHOWN} more.")
+        details.append(f"{len(reports)} program(s) looked up; "
+                       f"{len(unmatched)} had no database entry and were not checked.")
+        age = cache.age_days()
+        if age > self.STALE_DAYS:
+            details.append(f"These answers are {int(age)} days old. "
+                           f"Re-run `aegis vulns check` for current ones.")
+
+        if not vulnerable:
+            return self.result(
+                CheckStatus.PASS,
+                f"No known vulnerabilities in the {len(reports) - len(unmatched)} "
+                f"program(s) the database recognised.", details)
+
+        ranked = [r.worst for r in vulnerable if r.worst in _SEVERITY_ORDER]
+        worst = min(ranked, key=_SEVERITY_ORDER.index) if ranked else "UNKNOWN"
+        total = sum(len(r.vulnerabilities) for r in vulnerable)
+        summary = (f"{len(vulnerable)} installed program(s) have publicly known "
+                   f"vulnerabilities ({total} in total, worst rated {worst.lower()}).")
+        if worst in ("CRITICAL", "HIGH"):
+            return self.result(CheckStatus.FAIL, summary, details)
+        return self.result(CheckStatus.WARN, summary, details, severity=Severity.MEDIUM)
+
+    def _line(self, report) -> str:
+        counts = [f"{report.count(name)} {name.lower()}" for name in _SEVERITY_ORDER
+                  if report.count(name)]
+        line = f"{report.name} {report.version}: {len(report.vulnerabilities)} known"
+        if counts:
+            line += f" ({', '.join(counts)})"
+        if report.truncated:
+            line += f" - the database lists {report.listed}; only the first were read"
+        # Naming the entry it was matched against is the only way to notice a
+        # wrong match, and some program names are genuinely ambiguous.
+        return f"{line} [matched {report.product}]"
+
+
 def default_checks() -> list[PostureCheck]:
     return [
         FirewallEnabledCheck(),
@@ -899,4 +975,5 @@ def default_checks() -> list[PostureCheck]:
         GuestAccountCheck(),
         RiskyServicesCheck(),
         ScreenLockCheck(),
+        VulnerableSoftwareCheck(),
     ]

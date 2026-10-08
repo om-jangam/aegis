@@ -81,12 +81,13 @@ Score 81/100 (grade B): 1 failed, 1 warnings, 6 passed, 0 skipped
 
 | Area | What it does |
 |------|--------------|
-| ✅ **Security posture audit** | `aegis check`: 16 read-only checks (firewall, exposed services, OS updates, suspicious startup programs, antivirus, UAC, RDP/NLA, SMBv1, auto-logon, disk encryption, SSH hardening, file permissions, password policy, guest account, risky services, screen lock), scored 0-100 with a fix for each failure |
+| ✅ **Security posture audit** | `aegis check`: 17 read-only checks (firewall, exposed services, OS updates, vulnerable installed programs, suspicious startup programs, antivirus, UAC, RDP/NLA, SMBv1, auto-logon, disk encryption, SSH hardening, file permissions, password policy, guest account, risky services, screen lock), scored 0-100 with a fix for each failure |
 | 🛠️ **Safe hardening** | `aegis harden` and a **Fix** button on the Security Check page: explains the risk, shows exactly what will change, asks first, saves the old settings, applies, verifies and records the fix, with **Undo** |
 | 🔄 **Keeps watching** | `aegis autostart enable`, or one switch in Settings, starts monitoring whenever you sign in, with no window and no administrator rights. Only one Aegis ever watches: a second one shows what the first records |
 | 🌍 **DNS monitoring** | Sees which names this computer looks up: known-malicious domains, names that resolve to blocklisted addresses, machine-generated names, and data smuggled out through DNS |
 | 🔑 **Sign-in monitoring** | Reads the computer's own security log: password guessing and spraying, a success straight after failures, new accounts, accounts given administrator rights, lockouts |
 | 🔔 **Setting-change alerts** | Re-checks security settings on a timer and alerts when something that was safe (firewall, antivirus, UAC) is turned off again |
+| 📦 **Vulnerable software check** | `aegis vulns check`, or one button on the Security Check page: looks the installed programs up in the US National Vulnerability Database and reports the ones whose installed version has a publicly known flaw. Only a name and a version number are sent; answers are cached, so the security check itself stays offline |
 | 🌐 **Threat intelligence** | Flags connections to known botnet C2 and criminal networks (abuse.ch Feodo, URLhaus domains, Emerging Threats, Spamhaus DROP, or your own lists), even on port 443 |
 | 🧠 **Detection engine** | Explainable Python rules plus Sigma rules, all mapped to **MITRE ATT&CK**; every finding carries its technique, score and reasons |
 | 🗣️ **Plain-language guidance** | Every detected technique comes with "what this means and what to do" |
@@ -109,6 +110,7 @@ Score 81/100 (grade B): 1 failed, 1 warnings, 6 passed, 0 skipped
 | `aegis monitor [--json] [--auto-respond]` | Headless detection; `--json` prints one JSON finding per line |
 | `aegis report [-o file.html]` | Shareable HTML security report |
 | `aegis intel update` / `status` / `lookup <ip>` | Manage and query threat-intel blocklists |
+| `aegis vulns list` / `check [--limit N]` / `report` | List installed programs, look them up in the National Vulnerability Database, show what is known |
 | `aegis block <ip> [--note ...]` | Contain a remote host (needs Administrator / root) |
 | `aegis stop <pid> [--yes]` | Stop a running program, after confirmation |
 | `aegis autostart status \| enable \| disable` | Watch automatically from sign-in, and stop doing so |
@@ -326,9 +328,13 @@ never followed, so the token cannot be sent to another server.
   Administrator or root, and Aegis tells you which mode it is in.
 - **Local by default:** telemetry, findings and reports stay on the machine.
   The exceptions are `aegis intel update`, which downloads public blocklists
-  only when you run it, and [forwarding to SENTINEL-X](#forwarding-to-sentinel-x),
+  only when you run it; `aegis vulns check`, which sends a program name and a
+  version number (nothing else, and only when you run it) to the National
+  Vulnerability Database; and [forwarding to SENTINEL-X](#forwarding-to-sentinel-x),
   which is off unless you enable it.
-- **Read-only checks:** `aegis check` inspects settings and never changes them.
+- **Read-only checks:** `aegis check` inspects settings and never changes them,
+  and never uses the network: the vulnerability check reads only the answers
+  `aegis vulns check` cached earlier.
 
 ## Security engineering
 
