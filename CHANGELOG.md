@@ -13,6 +13,49 @@ All notable changes to Aegis are documented here. The format is based on
   residual risk.
 - Locale-independent firewall management via the Windows COM API (`INetFwPolicy2`).
 
+## [2.2.0] - 2026-10-12
+
+Aegis now answers the question that decides most break-ins: is the software on
+this computer out of date in a way attackers already know how to use?
+
+### Added
+- **Vulnerable software check**: `aegis vulns list | check | report`, and a
+  button on the Security Check page, read the installed programs from where the
+  system already keeps them (the registry uninstall entries, dpkg or rpm,
+  application bundles) and look each name and version up in the US National
+  Vulnerability Database. A flaw is reported only when the installed version is
+  in range, and only when the database marks *this* product as the vulnerable
+  one rather than something the vulnerable program merely runs on. A program the
+  database does not know is reported as "not checked", never as safe, and the
+  entry each name was matched to is always shown so a wrong match is visible.
+  Only a name and a version number are ever sent; answers are cached, so the
+  security check itself never touches the network. Seventeenth posture check.
+- **Restart as administrator**: one button, where the answer used to be "start it
+  as administrator" and no way to do it. Windows asks for consent in its own
+  dialog.
+- **Fix the safe ones**: every reversible fix that cannot cut anybody off from
+  their own computer, applied on one confirmation, each still recorded and
+  undoable on its own. Also `aegis harden apply-safe`, with `--dry-run`.
+- **Keeps watching, asked once**: Aegis asks on a later start whether to keep
+  monitoring after the window closes, and remembers either answer.
+
+### Fixed
+- Stopping a program stopped one of its processes, not the program. Stop now
+  covers every process of that program, matched by the file it runs from, so a
+  different program with the same name is never touched.
+- Clicking "Restart as administrator" emptied the fix history and every undo
+  button with it. Windows reports that it created a process, not that Aegis is
+  running in it: the handover closed the database on that promise, and when the
+  new copy failed to start the old one was left fully drawn and completely dead.
+  It now only stops watching, and keeps working if the new copy never appears.
+- Failing to read the fix history was drawn as "No fixes applied yet", the same
+  screen as a machine that has never been fixed, silently removing the only way
+  to reverse a change. It now says it could not read it.
+- The credential-dumping rule reported Windows' own LSASS process as a
+  credential-theft tool, on every Windows machine, because the rule matched any
+  command line containing "lsass" and LSASS's own command line contains its own
+  path. Visible only with administrator rights, which is what it took to find.
+
 ## [2.1.0] - 2026-09-27
 
 Aegis now protects the computer when nobody is looking at it.
